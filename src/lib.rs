@@ -31,8 +31,8 @@ impl Viewer {
 	}
 }
 
-fn wrap<'a, T: FromWasmAbi, F: Fn(T) + 'static>(callback: F) -> ScopedClosure<'a, dyn Fn(T)> {
-	Closure::wrap(Box::new(callback) as Box<dyn Fn(_)>)
+fn wrap<'a, T: FromWasmAbi, F: FnMut(T) + 'static>(callback: F) -> ScopedClosure<'a, dyn FnMut(T)> {
+	Closure::wrap(Box::new(callback) as Box<dyn FnMut(_)>)
 }
 
 fn draw(ctx: &CanvasRenderingContext2d, viewer: &mut Viewer) {
@@ -127,6 +127,42 @@ pub fn run() {
 
 	let c = wrap(onresize);
 	w.add_event_listener_with_callback("resize", &c.as_ref().unchecked_ref()).unwrap();
+	c.forget();
+
+	let onmouse = {
+		let mut pinpoint: Option<(f64, f64)> = None;
+
+		let ctx = ctx.clone();
+		let viewer = viewer.clone();
+		move |e: MouseEvent|{
+			let viewer: &mut Viewer = &mut viewer.lock().unwrap();
+
+			let pos = (
+				e.x() as f64,
+				e.y() as f64,
+			);
+
+			if pinpoint.is_none() && (e.buttons() & 1) > 0 {
+				let mut tmp = pos;
+				tmp.0 += viewer.camera_pos.0;
+				tmp.1 += viewer.camera_pos.1;
+
+				pinpoint = Some(tmp);
+			} else if (e.buttons() & 1) == 0 {
+				pinpoint = None;
+			}
+
+			if let Some(pinpoint) = pinpoint {
+				viewer.camera_pos.0 = pinpoint.0 - pos.0;
+				viewer.camera_pos.1 = pinpoint.1 - pos.1;
+
+				viewer.update_bounds();
+				draw(ctx.as_ref(), viewer);
+			}
+		}
+	};
+	let c = wrap(onmouse);
+	canvas.add_event_listener_with_callback("mousemove", &c.as_ref().unchecked_ref()).unwrap();
 	c.forget();
 
 	let update = {

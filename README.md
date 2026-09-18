@@ -5,7 +5,7 @@ It's intended to be a web app that can also run natively on Linux (maybe Windows
 ---
 
 ## Features
-- [ ] Infinite canvas
+- [x] Infinite canvas
 - [ ] Save state (as something like a base64 string if possible)
 - [ ] QOL for the editor
 	- [ ] Undo and redo
