@@ -14,8 +14,8 @@ fn main() {
 struct Cell(bool);
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
-struct Canvas(Vec<Vec<Cell>>);
-impl Canvas {
+pub struct Grid(Vec<Vec<Cell>>);
+impl Grid {
 	fn compute_cell(&self, x: u64, y: u64) -> Cell {
 		let height = self.0.len() as u64;
 		let width = self.0[0].len() as u64;
@@ -194,7 +194,6 @@ impl Canvas {
 				row.pop();
 			}
 		}
-
 	}
 
 	/// Return the height.
@@ -230,21 +229,21 @@ impl Canvas {
 
 #[test]
 fn shrink() {
-	let mut canvas = Canvas::new(0, 0);
+	let mut canvas = Grid::new(0, 0);
 	canvas.set_cell(0, 0, Cell(false));
 	canvas.shrink();
 
 	assert_eq!(canvas.width(), 0);
 	assert_eq!(canvas.height(), 0);
 
-	let mut canvas = Canvas::new(0, 0);
+	let mut canvas = Grid::new(0, 0);
 	canvas.set_cell(0, 0, Cell(true));
 	canvas.shrink();
 
 	assert_eq!(canvas.width(), 1);
 	assert_eq!(canvas.height(), 1);
 
-	let mut canvas = Canvas::new(3, 3);
+	let mut canvas = Grid::new(3, 3);
 	canvas.set_cell(0, 1, Cell(true));
 	canvas.set_cell(1, 1, Cell(true));
 	canvas.set_cell(2, 1, Cell(true));
@@ -257,7 +256,7 @@ fn shrink() {
 
 #[test]
 fn blinker() {
-	let mut canvas = Canvas::new(3, 3);
+	let mut canvas = Grid::new(3, 3);
 
 	canvas.set_cell(0, 1, Cell(true));
 	canvas.set_cell(1, 1, Cell(true));
@@ -269,7 +268,7 @@ fn blinker() {
 	canvas.advance();
 	canvas.shrink();
 
-	let mut other = Canvas::new(3, 3);
+	let mut other = Grid::new(3, 3);
 	other.set_cell(1, 0, Cell(true));
 	other.set_cell(1, 1, Cell(true));
 	other.set_cell(1, 2, Cell(true));
