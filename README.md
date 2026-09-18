@@ -1,5 +1,5 @@
 # Conway's Game of Life
-This is a Rust implementation of (Conway's Game of Life)[https://en.wikipedia.org/wiki/Conway's_Game_of_Life] (*cgol*).
+This is a Rust implementation of [Conway's Game of Life](https://en.wikipedia.org/wiki/Conway's_Game_of_Life) (**cgol**).
 It's intended to be a web app that can also run natively on Linux (maybe Windows and macOS later on).
 
 ---
