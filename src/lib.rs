@@ -7,6 +7,8 @@ use std::sync::{Arc, Mutex};
 mod cgol;
 pub use cgol::*;
 
+const CELL_SIZE: f64 = 50.0;
+
 fn wrap<'a, T: FromWasmAbi, F: Fn(T) + 'static>(callback: F) -> ScopedClosure<'a, dyn Fn(T)> {
 	Closure::wrap(Box::new(callback) as Box<dyn Fn(_)>)
 }
@@ -20,7 +22,6 @@ fn draw(ctx: &CanvasRenderingContext2d, grid: &Grid) {
 	// ctx.clear_rect(0.0, 0.0, width as f64, height as f64);
 
 	let cells = grid.get_cells();
-	let sz = 50.0;
 	let m = 0.0;
 	for (i, row) in cells.iter().enumerate() {
 		for (j, c) in row.iter().enumerate() {
@@ -45,8 +46,8 @@ fn draw(ctx: &CanvasRenderingContext2d, grid: &Grid) {
 
 			ctx.begin_path();
 			ctx.rect(
-				(sz + m) * j, (sz + m) * i,
-				sz, sz,
+				(CELL_SIZE + m) * j, (CELL_SIZE + m) * i,
+				CELL_SIZE, CELL_SIZE,
 			);
 			ctx.stroke();
 			ctx.fill();
@@ -77,15 +78,23 @@ pub fn run() {
 	let onresize = {
 		let ctx = ctx.clone();
 		let w = w.window();
-		let c = grid.clone();
+		let grid = grid.clone();
 		let canvas = canvas.clone();
 		move |_: Event|{
 			let width = w.inner_width().unwrap().as_f64().unwrap();
 			let height = w.inner_height().unwrap().as_f64().unwrap();
 
+			let grid: &mut Grid = &mut grid.lock().unwrap();
+
+			grid.set_bounds(
+				0, 0,
+				(width / CELL_SIZE).ceil() as u64,
+				(height / CELL_SIZE).ceil() as u64,
+			);
+
 			canvas.set_width(width as u32);
 			canvas.set_height(height as u32);
-			draw(ctx.as_ref(), &c.lock().unwrap());
+			draw(ctx.as_ref(), grid);
 		}
 	};
 	onresize(Event::new("resize").unwrap());

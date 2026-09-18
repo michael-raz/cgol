@@ -240,6 +240,25 @@ impl Grid {
 		Self{origin: (0, 0), cells}
 	}
 
+	/// Expand the grid, relative to the origin.
+	pub fn set_bounds(&mut self, neg_x: u64, neg_y: u64, pos_x: u64, pos_y: u64) {
+		while self.origin.0 < neg_x {
+			self.left_extend();
+		}
+
+		while self.origin.1 < neg_y {
+			self.top_extend();
+		}
+
+		while self.width() - self.origin.0 < pos_x {
+			self.right_extend();
+		}
+
+		while self.height() - self.origin.1 < pos_y {
+			self.bottom_extend();
+		}
+	}
+
 	/// Get the origin point of the grid.
 	pub fn get_origin(&self) -> (u64, u64) {
 		self.origin
