@@ -15,17 +15,35 @@ macro_rules! consolelog {
 	};
 }
 
+struct Viewer {
+	grid: Grid,
+	viewport_dim: (f64, f64),
+	camera_pos: (f64, f64),
+}
+impl Viewer {
+	fn update_bounds(&mut self) {
+		self.grid.set_bounds(
+			(self.camera_pos.0.min(0.0) / CELL_SIZE).abs().ceil() as u64,
+			(self.camera_pos.1.min(0.0) / CELL_SIZE).abs().ceil() as u64,
+			((self.viewport_dim.0 + self.camera_pos.0.max(0.0)) / CELL_SIZE).ceil() as u64,
+			((self.viewport_dim.1 + self.camera_pos.1.max(0.0)) / CELL_SIZE).ceil() as u64,
+		);
+	}
+}
+
 fn wrap<'a, T: FromWasmAbi, F: Fn(T) + 'static>(callback: F) -> ScopedClosure<'a, dyn Fn(T)> {
 	Closure::wrap(Box::new(callback) as Box<dyn Fn(_)>)
 }
 
-fn draw(ctx: &CanvasRenderingContext2d, grid: &Grid) {
-	let width = ctx.canvas().unwrap().width();
-	let height = ctx.canvas().unwrap().height();
+fn draw(ctx: &CanvasRenderingContext2d, viewer: &mut Viewer) {
+	viewer.update_bounds();
+	let (width, height) = viewer.viewport_dim;
 
 	ctx.set_fill_style_str("#00ff00");
 	ctx.fill_rect(0.0, 0.0, width as f64, height as f64);
 	// ctx.clear_rect(0.0, 0.0, width as f64, height as f64);
+
+	let grid = &viewer.grid;
 
 	let cells = grid.get_cells();
 	let m = 0.0;
@@ -52,7 +70,8 @@ fn draw(ctx: &CanvasRenderingContext2d, grid: &Grid) {
 
 			ctx.begin_path();
 			ctx.rect(
-				(CELL_SIZE + m) * j, (CELL_SIZE + m) * i,
+				(CELL_SIZE + m) * j - viewer.camera_pos.0,
+				(CELL_SIZE + m) * i - viewer.camera_pos.1,
 				CELL_SIZE, CELL_SIZE,
 			);
 			ctx.stroke();
@@ -78,29 +97,30 @@ pub fn run() {
 	grid.set_cell(1, 0, Cell::new(true));
 	grid.set_cell(1, 1, Cell::new(true));
 	grid.set_cell(1, 2, Cell::new(true));
-	let grid = Arc::new(Mutex::new(grid));
-	draw(ctx.clone().as_ref(), &grid.lock().unwrap());
+	let viewer = Viewer{
+		grid,
+		viewport_dim: (0.0, 0.0),
+		camera_pos: (0.0, 0.0),
+	};
+	let viewer = Arc::new(Mutex::new(viewer));
+	draw(ctx.clone().as_ref(), &mut viewer.lock().unwrap());
 
 	let onresize = {
 		let ctx = ctx.clone();
 		let w = w.window();
-		let grid = grid.clone();
+		let viewer = viewer.clone();
 		let canvas = canvas.clone();
 		move |_: Event|{
 			let width = w.inner_width().unwrap().as_f64().unwrap();
 			let height = w.inner_height().unwrap().as_f64().unwrap();
 
-			let grid: &mut Grid = &mut grid.lock().unwrap();
-
-			grid.set_bounds(
-				0, 0,
-				(width / CELL_SIZE).ceil() as u64,
-				(height / CELL_SIZE).ceil() as u64,
-			);
+			let viewer: &mut Viewer = &mut viewer.lock().unwrap();
+			viewer.viewport_dim = (width, height);
+			viewer.update_bounds();
 
 			canvas.set_width(width as u32);
 			canvas.set_height(height as u32);
-			draw(ctx.as_ref(), grid);
+			draw(ctx.as_ref(), viewer);
 		}
 	};
 	onresize(Event::new("resize").unwrap());
@@ -111,11 +131,11 @@ pub fn run() {
 
 	let update = {
 		let ctx = ctx.clone();
-		let grid = grid.clone();
+		let viewer = viewer.clone();
 		move |_: Event|{
-			let grid: &mut Grid = &mut grid.lock().unwrap();
-			grid.advance();
-			draw(ctx.as_ref(), grid);
+			let viewer: &mut Viewer = &mut viewer.lock().unwrap();
+			viewer.grid.advance();
+			draw(ctx.as_ref(), viewer);
 		}
 	};
 	let c = wrap(update);
