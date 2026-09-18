@@ -11,7 +11,16 @@ fn main() {
 
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
-struct Cell(bool);
+pub struct Cell(bool);
+impl Cell {
+	pub fn new(alive: bool) -> Self {
+		Self(alive)
+	}
+
+	pub fn is_alive(&self) -> bool {
+		self.0
+	}
+}
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Grid(Vec<Vec<Cell>>);
@@ -222,6 +231,10 @@ impl Grid {
 		out.resize(height, row);
 
 		return Self(out);
+	}
+
+	pub fn get_cells(&self) -> &'_ Vec<Vec<Cell>> {
+		&self.0
 	}
 }
 
