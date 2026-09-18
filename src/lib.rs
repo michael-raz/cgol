@@ -9,6 +9,12 @@ pub use cgol::*;
 
 const CELL_SIZE: f64 = 50.0;
 
+macro_rules! consolelog {
+	($($e:expr),+) => {
+		console::log_1(&format!($($e),+).into())
+	};
+}
+
 fn wrap<'a, T: FromWasmAbi, F: Fn(T) + 'static>(callback: F) -> ScopedClosure<'a, dyn Fn(T)> {
 	Closure::wrap(Box::new(callback) as Box<dyn Fn(_)>)
 }
