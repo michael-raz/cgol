@@ -145,10 +145,10 @@ impl Grid {
 			self.0 = vec![vec![Cell::default()]]
 		}
 
-		while self.0.len() < y {
+		while self.0.len() <= y {
 			self.bottom_extend();
 		}
-		while self.0[0].len() < x {
+		while self.0[0].len() <= x {
 			self.right_extend();
 		}
 
