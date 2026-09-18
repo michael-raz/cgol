@@ -20,11 +20,15 @@ impl Cell {
 
 /// A grid where Conway's Game of Life is played.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct Grid(Vec<Vec<Cell>>);
+pub struct Grid{
+	origin: (u64, u64),
+	cells: Vec<Vec<Cell>>,
+}
+
 impl Grid {
 	fn compute_cell(&self, x: u64, y: u64) -> Cell {
-		let height = self.0.len() as u64;
-		let width = self.0[0].len() as u64;
+		let height = self.cells.len() as u64;
+		let width = self.cells[0].len() as u64;
 
 		let offsets: [(i64, i64); 8] = [
 			(-1, -1), ( 0, -1), ( 1, -1),
@@ -32,7 +36,7 @@ impl Grid {
 			(-1,  1), ( 0,  1), ( 1,  1),
 		];
 
-		let cell = &self.0[y as usize][x as usize];
+		let cell = &self.cells[y as usize][x as usize];
 
 		let mut n = 0;
 		for (i, j) in offsets {
@@ -49,7 +53,7 @@ impl Grid {
 				continue;
 			}
 
-			let other = &self.0[y.checked_add_signed(j).unwrap() as usize][x.checked_add_signed(i).unwrap() as usize];
+			let other = &self.cells[y.checked_add_signed(j).unwrap() as usize][x.checked_add_signed(i).unwrap() as usize];
 			if other.0 {
 				n += 1;
 			}
@@ -59,36 +63,40 @@ impl Grid {
 	}
 
 	fn top_extend(&mut self) {
+		self.origin.1 += 1;
+
 		let mut tmp = Vec::new();
-		tmp.resize(self.0[0].len(), Cell::default());
-		self.0.insert(0, tmp);
+		tmp.resize(self.cells[0].len(), Cell::default());
+		self.cells.insert(0, tmp);
 	}
 	fn bottom_extend(&mut self) {
 		let mut tmp = Vec::new();
-		tmp.resize(self.0[0].len(), Cell::default());
-		self.0.push(tmp);
+		tmp.resize(self.cells[0].len(), Cell::default());
+		self.cells.push(tmp);
 	}
 	fn left_extend(&mut self) {
-		for row in self.0.iter_mut() {
+		self.origin.0 += 1;
+
+		for row in self.cells.iter_mut() {
 			row.insert(0, Cell::default())
 		}
 	}
 	fn right_extend(&mut self) {
-		for row in self.0.iter_mut() {
+		for row in self.cells.iter_mut() {
 			row.push(Cell::default())
 		}
 	}
 
 	fn prefit(&mut self) {
-		if self.0.len() <= 0 {
+		if self.cells.len() <= 0 {
 			return;
 		}
 
 		let edges = (
-			self.0[0].iter().any(|x| x.0),                       // top
-			self.0[self.0.len() - 1].iter().any(|x| x.0),        // bottom
-			self.0.iter().map(|x| &x[0]).any(|x| x.0),           // left
-			self.0.iter().map(|x| &x[x.len() - 1]).any(|x| x.0), // right
+			self.cells[0].iter().any(|x| x.0),                       // top
+			self.cells[self.cells.len() - 1].iter().any(|x| x.0),    // bottom
+			self.cells.iter().map(|x| &x[0]).any(|x| x.0),           // left
+			self.cells.iter().map(|x| &x[x.len() - 1]).any(|x| x.0), // right
 		);
 
 		// add edges if the current edge has any cells that're alive
@@ -108,13 +116,13 @@ impl Grid {
 
 	/// Advence by a generation.
 	pub fn advance(&mut self) {
-		if self.0.len() <= 0 {
+		if self.cells.len() <= 0 {
 			return;
 		}
 		self.prefit();
 
-		let height = self.0.len();
-		let width = self.0[0].len();
+		let height = self.cells.len();
+		let width = self.cells[0].len();
 
 		// setup scratch buffer
 		let mut scratch = {
@@ -133,7 +141,7 @@ impl Grid {
 				scratch[y][x] = self.compute_cell(x as u64, y as u64);
 			}
 		}
-		self.0 = scratch;
+		self.cells = scratch;
 	}
 
 	/// Set a cell's value at a given xy coordinate.
@@ -141,62 +149,64 @@ impl Grid {
 		let x = x as usize;
 		let y = y as usize;
 
-		if self.0.len() <= 0 {
-			self.0 = vec![vec![Cell::default()]]
+		if self.cells.len() <= 0 {
+			self.cells = vec![vec![Cell::default()]]
 		}
 
-		while self.0.len() <= y {
+		while self.cells.len() <= y {
 			self.bottom_extend();
 		}
-		while self.0[0].len() <= x {
+		while self.cells[0].len() <= x {
 			self.right_extend();
 		}
 
-		self.0[y][x] = value;
+		self.cells[y][x] = value;
 	}
 
 	/// Shrinks the table to be as small as possible (without loosing any data).
 	pub fn shrink(&mut self) {
-		if self.0.len() <= 0 {
+		if self.cells.len() <= 0 {
 			return;
 		}
 
 		// top
 		let mut count = 0;
-		while count < self.0.len() && !self.0[count].iter().any(|x| x.0) {
+		while count < self.cells.len() && !self.cells[count].iter().any(|x| x.0) {
 			count += 1;
 		}
-		drop(self.0.drain(..count));
+		self.origin.1 -= count as u64;
+		drop(self.cells.drain(..count));
 
-		if self.0.len() <= 0 {
+		if self.cells.len() <= 0 {
 			return;
 		}
 
 		// bottom
 		let mut count = 0;
-		while count < self.0.len() && !self.0[self.0.len() - 1 - count].iter().any(|x| x.0) {
+		while count < self.cells.len() && !self.cells[self.cells.len() - 1 - count].iter().any(|x| x.0) {
 			count += 1;
 		}
-		drop(self.0.drain(self.0.len() - count..));
+		drop(self.cells.drain(self.cells.len() - count..));
 
-		if self.0.len() <= 0 {
+		if self.cells.len() <= 0 {
 			return;
 		}
 
 		// right
-		while !self.0.iter().any(|row| row[0].0) {
-			for row in self.0.iter_mut() {
+		while !self.cells.iter().any(|row| row[0].0) {
+			for row in self.cells.iter_mut() {
 				drop(row.drain(..1));
 				if row.len() <= 0 {
-					self.0.clear();
+					self.cells.clear();
 					return;
 				}
 			}
 		}
 
 		// left
-		while !self.0.iter().any(|row| row[row.len() - 1].0) {
-			for row in self.0.iter_mut() {
+		while !self.cells.iter().any(|row| row[row.len() - 1].0) {
+			for row in self.cells.iter_mut() {
+				self.origin.0 -= 1;
 				row.pop();
 			}
 		}
@@ -204,16 +214,16 @@ impl Grid {
 
 	/// Return the height.
 	pub fn height(&self) -> u64 {
-		return self.0.len() as u64;
+		return self.cells.len() as u64;
 	}
 
 	/// Return the width.
 	pub fn width(&self) -> u64 {
-		if self.0.len() <= 0 {
+		if self.cells.len() <= 0 {
 			return 0;
 		}
 
-		return self.0[0].len() as u64;
+		return self.cells[0].len() as u64;
 	}
 
 	/// Create a new `Canvas` with an initial width and height.
@@ -224,14 +234,20 @@ impl Grid {
 		let mut row = Vec::new();
 		row.resize(width, Cell::default());
 
-		let mut out = Vec::new();
-		out.resize(height, row);
+		let mut cells = Vec::new();
+		cells.resize(height, row);
 
-		return Self(out);
+		Self{origin: (0, 0), cells}
 	}
 
+	/// Get the origin point of the grid.
+	pub fn get_origin(&self) -> (u64, u64) {
+		self.origin
+	}
+
+	/// Get all of the cells that this grid manages.
 	pub fn get_cells(&self) -> &'_ Vec<Vec<Cell>> {
-		&self.0
+		&self.cells
 	}
 }
 

@@ -11,7 +11,7 @@ fn wrap<'a, T: FromWasmAbi, F: Fn(T) + 'static>(callback: F) -> ScopedClosure<'a
 	Closure::wrap(Box::new(callback) as Box<dyn Fn(_)>)
 }
 
-fn draw(ctx: &CanvasRenderingContext2d, canvas: &Grid) {
+fn draw(ctx: &CanvasRenderingContext2d, grid: &Grid) {
 	let width = ctx.canvas().unwrap().width();
 	let height = ctx.canvas().unwrap().height();
 
@@ -19,7 +19,7 @@ fn draw(ctx: &CanvasRenderingContext2d, canvas: &Grid) {
 	ctx.fill_rect(0.0, 0.0, width as f64, height as f64);
 	// ctx.clear_rect(0.0, 0.0, width as f64, height as f64);
 
-	let cells = canvas.get_cells();
+	let cells = grid.get_cells();
 	let sz = 50.0;
 	let m = 0.0;
 	for (i, row) in cells.iter().enumerate() {
@@ -36,8 +36,8 @@ fn draw(ctx: &CanvasRenderingContext2d, canvas: &Grid) {
 				ctx.set_stroke_style_str("#ff00ff");
 			}
 
-			let i = i as f64;
-			let j = j as f64;
+			let i = i as f64 - grid.get_origin().1 as f64;
+			let j = j as f64 - grid.get_origin().0 as f64;
 
 			ctx.set_fill_style_str(color);
 			ctx.set_stroke_style_str("#808080");
