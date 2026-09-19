@@ -10,7 +10,7 @@ pub use cgol::*;
 const CELL_SIZE: f64 = 50.0;
 
 macro_rules! consolelog {
-	($($e:expr),+) => {
+	($($e:expr),+ $(,)?) => {
 		console::log_1(&format!($($e),+).into())
 	};
 }
@@ -50,58 +50,48 @@ fn wrap<'a, T: FromWasmAbi, F: FnMut(T) + 'static>(callback: F) -> ScopedClosure
 }
 
 fn draw(ctx: &CanvasRenderingContext2d, viewer: &mut Viewer) {
-	viewer.update_bounds();
 	let (width, height) = viewer.viewport_dim;
 
-	ctx.set_fill_style_str("#00ff00");
+	const DEAD_COLOR:  &str = "#0f0f0f";
+	const ALIVE_COLOR: &str = "#f0f0f0";
+
+	ctx.set_fill_style_str(DEAD_COLOR);
 	ctx.fill_rect(0.0, 0.0, width as f64, height as f64);
 	// ctx.clear_rect(0.0, 0.0, width as f64, height as f64);
 
 	let grid = &viewer.grid;
 
-	let mut start = viewer.from_screen_space((0.0, 0.0));
-	let mut end = viewer.from_screen_space(viewer.viewport_dim);
-
 	let cells = grid.get_cells();
 	let origin = grid.get_origin();
 	let size = CELL_SIZE * viewer.scale;
+
+	let mut start = viewer.from_screen_space((0.0, 0.0));
+	let mut end = viewer.from_screen_space(viewer.viewport_dim);
 
 	start.0 = (start.0 / CELL_SIZE + origin.0 as f64).floor();
 	start.1 = (start.1 / CELL_SIZE + origin.1 as f64).floor();
 	end.0 = (end.0 / CELL_SIZE + origin.0 as f64).ceil();
 	end.1 = (end.1 / CELL_SIZE + origin.1 as f64).ceil();
 
-	for i in start.1 as usize..end.1 as usize {
-		for j in start.0 as usize..end.0 as usize {
+	let rows = viewer.grid.height().min(start.1 as usize)..viewer.grid.height().min(end.1 as usize);
+	let cols = viewer.grid.width().min(start.0 as usize)..viewer.grid.width().min(end.0 as usize);
+
+	ctx.set_fill_style_str(ALIVE_COLOR);
+	for i in rows {
+		for j in cols.clone() {
 			let c = &cells[i][j];
-
-			let color = if c.is_alive() {
-				"#f0f0f0"
-			} else {
-				"#0f0f0f"
-			};
-
-			if j == 15 {
-				ctx.set_stroke_style_str("#00ffff");
-			} else {
-				ctx.set_stroke_style_str("#ff00ff");
+			if !c.is_alive() {
+				continue;
 			}
 
 			let i = i as f64 - grid.get_origin().1 as f64;
 			let j = j as f64 - grid.get_origin().0 as f64;
 
-			ctx.set_fill_style_str(color);
-			ctx.set_stroke_style_str("#808080");
-			ctx.set_line_width(5.0);
-
-			ctx.begin_path();
-			ctx.rect(
+			ctx.fill_rect(
 				size * j - viewer.camera_pos.0,
 				size * i - viewer.camera_pos.1,
 				size, size,
 			);
-			ctx.stroke();
-			ctx.fill();
 		}
 	}
 }
@@ -119,6 +109,7 @@ pub fn run() {
 		.dyn_into::<CanvasRenderingContext2d>().unwrap();
 	let ctx = Arc::new(ctx);
 
+	// acorn
 	let grid = Grid::from_bits(&[
 		[0, 1, 0, 0, 0, 0 ,0],
 		[0, 0, 0, 1, 0, 0 ,0],
@@ -145,7 +136,6 @@ pub fn run() {
 
 			let viewer: &mut Viewer = &mut viewer.lock().unwrap();
 			viewer.viewport_dim = (width, height);
-			viewer.update_bounds();
 
 			canvas.set_width(width as u32);
 			canvas.set_height(height as u32);
@@ -188,7 +178,6 @@ pub fn run() {
 				viewer.camera_pos.0 = pinpoint.0 - pos.0;
 				viewer.camera_pos.1 = pinpoint.1 - pos.1;
 
-				viewer.update_bounds();
 				draw(ctx.as_ref(), viewer);
 			}
 		}
@@ -217,7 +206,7 @@ pub fn run() {
 				pos.0 = pos.0 / CELL_SIZE + origin.0 as f64;
 				pos.1 = pos.1 / CELL_SIZE + origin.1 as f64;
 
-				let alive = viewer.grid.get_cells()[pos.1 as usize][pos.0 as usize].is_alive();
+				let alive = viewer.grid.get_cell(pos.0 as usize, pos.1 as usize).map(|c| c.is_alive()).unwrap_or(false);
 				viewer.grid.set_cell(pos.0 as u64, pos.1 as u64, Cell::new(!alive));
 
 				draw(ctx.as_ref(), viewer);
@@ -243,7 +232,6 @@ pub fn run() {
 			viewer.camera_pos.0 = (viewer.scale / prev) * (mpos.0 + viewer.camera_pos.0) - mpos.0;
 			viewer.camera_pos.1 = (viewer.scale / prev) * (mpos.1 + viewer.camera_pos.1) - mpos.1;
 
-			viewer.update_bounds();
 			draw(ctx.as_ref(), viewer);
 		}
 	};

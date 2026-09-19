@@ -275,6 +275,11 @@ impl Grid {
 		&self.cells
 	}
 
+	/// Get a particular cell. If the cell is out of bounds, `None` is returned.
+	pub fn get_cell(&self, x: usize, y: usize) -> Option<&Cell> {
+		(x < self.width() && y < self.height()).then(|| &self.cells[y][x])
+	}
+
 	/// Writes the state of this grid into `out`.
 	///
 	/// The format starts with this pseudo code header (using little endian):
