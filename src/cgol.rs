@@ -6,6 +6,7 @@
 
 
 use std::ops::Range;
+use std::io::{self, Read, Write};
 
 
 
@@ -274,6 +275,76 @@ impl Grid {
 		&self.cells
 	}
 
+	/// Writes the state of this grid into `out`.
+	///
+	/// The format starts with this pseudo code header (using little endian):
+	/// ```no_run
+	/// #[repr(C)]
+	/// struct Header {
+	///     width: u64,
+	///     height: u64,
+	///     origin_x: i64,
+	///     origin_y: i64,
+	/// }
+	/// ```
+	/// Which is then followed by `height` rows of cells of length `width`.
+	/// Each cell is a single byte where `0x01` is alive and `0x00` is dead.
+	pub fn save(&self, out: &mut impl Write) -> io::Result<()> {
+		let mut data = self.clone();
+		data.shrink();
+
+		out.write((self.width() as u64).to_le_bytes().as_slice())?;
+		out.write((self.height() as u64).to_le_bytes().as_slice())?;
+		out.write((self.origin.0 as i64).to_le_bytes().as_slice())?;
+		out.write((self.origin.1 as i64).to_le_bytes().as_slice())?;
+
+		for row in self.cells.iter() {
+			let iter = row.iter().map(|c|
+				if c.is_alive() { 1 } else { 0 }
+			);
+			out.write(&iter.collect::<Vec<_>>())?;
+		}
+
+		return Ok(());
+	}
+
+	/// Reads from `src` to create a [Grid].
+	///
+	/// See [save][Grid::save] for details on the format.
+	pub fn load(src: &mut impl Read) -> io::Result<Self> {
+		macro_rules! read_le {
+			($src:ident, $t:ty) => {{
+				let mut buf = [0u8; std::mem::size_of::<$t>()];
+				src.read_exact(&mut buf)?;
+
+				<$t>::from_le_bytes(buf)
+			}};
+		}
+
+		let width = read_le!(src, u64);
+		let height = read_le!(src, u64);
+		let origin = (
+			read_le!(src, i64) as isize,
+			read_le!(src, i64) as isize,
+		);
+
+		let mut cells = vec![];
+		cells.resize(height as usize, Vec::<Cell>::with_capacity(width as usize));
+
+		let mut buf = Vec::with_capacity(width as usize);
+		for out in cells.iter_mut() {
+			buf.clear();
+			src.take(width).read_to_end(&mut buf)?;
+
+			out.extend(buf.iter().map(|&b| Cell::new(b > 0)))
+		}
+
+		return Ok(Self{
+			origin,
+			cells,
+		})
+	}
+
 	/// Initialize a grid using a table of 1's and 0's.
 	pub fn from_bits<const N: usize>(src: &[[u8; N]]) -> Self {
 		let alive = src.into_iter().flat_map(|row| row.into_iter()).enumerate()
@@ -286,6 +357,79 @@ impl Grid {
 	}
 }
 
+
+
+fn gen_test_grids() -> impl Iterator<Item=Grid> {
+	fn from_bits<const N: usize>(src: &[u8]) -> Vec<(u64, u64)> {
+		src.into_iter().enumerate()
+			.filter_map(|(i, &x)| (x > 0).then_some(((i % N) as u64, (i / N) as u64)))
+			.collect::<Vec<_>>()
+	}
+
+	let data = vec![
+		// empty
+		[].to_vec(),
+
+		// one cell
+		[(0, 0)].to_vec(),
+
+		// block (stable)
+		from_bits::<2>(&[
+			1, 1,
+			1, 1,
+		]),
+
+		// tub (stable)
+		from_bits::<3>(&[
+			0, 1, 0,
+			1, 0, 1,
+			0, 1, 0,
+		]),
+
+		// blinker (period of 2)
+		from_bits::<3>(&[
+			0, 1, 0,
+			0, 1, 0,
+			0, 1, 0,
+		]),
+
+		// glider
+		from_bits::<3>(&[
+			0, 0, 1,
+			1, 0, 1,
+			0, 1, 1,
+		]),
+	];
+
+	data.into_iter().map(|cells|
+		cells.into_iter().fold(Grid::new(0, 0), |mut out, pos| {
+			out.set_cell(pos.0, pos.1, Cell::new(true));
+			out
+		})
+	)
+}
+
+
+
+#[test]
+fn save_load() {
+	fn assert_match(grid: Grid) {
+		let mut raw = vec![];
+		grid.save(&mut raw).unwrap();
+
+		let out = Grid::load(&mut io::Cursor::new(raw)).unwrap();
+
+		assert_eq!(grid, out);
+	}
+
+	assert_match(Grid::new(0, 0));
+	assert_match(Grid::new(0, 1));
+	assert_match(Grid::new(1, 0));
+	assert_match(Grid::new(100, 5));
+	assert_match(Grid::new(5, 100));
+
+	gen_test_grids().for_each(assert_match);
+}
 
 
 #[test]
