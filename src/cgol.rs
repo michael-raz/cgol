@@ -5,6 +5,10 @@
 
 
 
+use std::ops::Range;
+
+
+
 /// Represents a cell in a [Grid].
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Cell(bool);
@@ -21,22 +25,22 @@ impl Cell {
 /// A grid where Conway's Game of Life is played.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Grid{
-	origin: (u64, u64),
+	origin: (isize, isize),
 	cells: Vec<Vec<Cell>>,
 }
 
 impl Grid {
-	fn compute_cell(&self, x: u64, y: u64) -> Cell {
-		let height = self.cells.len() as u64;
-		let width = self.cells[0].len() as u64;
+	fn compute_cell(&self, xy: (usize, usize)) -> Cell {
+		let height = self.cells.len();
+		let width = self.cells[0].len();
 
-		let offsets: [(i64, i64); 8] = [
+		let offsets: [(isize, isize); 8] = [
 			(-1, -1), ( 0, -1), ( 1, -1),
 			(-1,  0),           ( 1,  0),
 			(-1,  1), ( 0,  1), ( 1,  1),
 		];
 
-		let cell = &self.cells[y as usize][x as usize];
+		let cell = &self.cells[xy.1][xy.0];
 
 		let mut n = 0;
 		for (i, j) in offsets {
@@ -46,14 +50,14 @@ impl Grid {
 			}
 
 			// ignore outside of canvas
-			if (x == 0 && i < 0) || (x + 1 >= width && i > 0) {
+			if (xy.0 == 0 && i < 0) || (xy.0 + 1 >= width && i > 0) {
 				continue;
 			}
-			if (y == 0 && j < 0) || (y + 1 >= height && j > 0) {
+			if (xy.1 == 0 && j < 0) || (xy.1 + 1 >= height && j > 0) {
 				continue;
 			}
 
-			let other = &self.cells[y.checked_add_signed(j).unwrap() as usize][x.checked_add_signed(i).unwrap() as usize];
+			let other = &self.cells[xy.1.checked_add_signed(j).unwrap()][xy.0.checked_add_signed(i).unwrap() as usize];
 			if other.0 {
 				n += 1;
 			}
@@ -138,7 +142,7 @@ impl Grid {
 		// actually compute then swap self data with scratch buffer
 		for y in 0..height {
 			for x in 0..width {
-				scratch[y][x] = self.compute_cell(x as u64, y as u64);
+				scratch[y][x] = self.compute_cell((x, y));
 			}
 		}
 		self.cells = scratch;
@@ -163,67 +167,19 @@ impl Grid {
 		self.cells[y][x] = value;
 	}
 
-	/// Shrinks the table to be as small as possible (without loosing any data).
-	pub fn shrink(&mut self) {
-		if self.cells.len() <= 0 {
-			return;
-		}
-
-		// top
-		let mut count = 0;
-		while count < self.cells.len() && !self.cells[count].iter().any(|x| x.0) {
-			count += 1;
-		}
-		self.origin.1 -= count as u64;
-		drop(self.cells.drain(..count));
-
-		if self.cells.len() <= 0 {
-			return;
-		}
-
-		// bottom
-		let mut count = 0;
-		while count < self.cells.len() && !self.cells[self.cells.len() - 1 - count].iter().any(|x| x.0) {
-			count += 1;
-		}
-		drop(self.cells.drain(self.cells.len() - count..));
-
-		if self.cells.len() <= 0 {
-			return;
-		}
-
-		// right
-		while !self.cells.iter().any(|row| row[0].0) {
-			for row in self.cells.iter_mut() {
-				drop(row.drain(..1));
-				if row.len() <= 0 {
-					self.cells.clear();
-					return;
-				}
-			}
-		}
-
-		// left
-		while !self.cells.iter().any(|row| row[row.len() - 1].0) {
-			for row in self.cells.iter_mut() {
-				self.origin.0 -= 1;
-				row.pop();
-			}
-		}
-	}
 
 	/// Return the height.
-	pub fn height(&self) -> u64 {
-		return self.cells.len() as u64;
+	pub fn height(&self) -> usize {
+		return self.cells.len();
 	}
 
 	/// Return the width.
-	pub fn width(&self) -> u64 {
+	pub fn width(&self) -> usize {
 		if self.cells.len() <= 0 {
 			return 0;
 		}
 
-		return self.cells[0].len() as u64;
+		return self.cells[0].len();
 	}
 
 	/// Create a new `Canvas` with an initial width and height.
@@ -241,26 +197,79 @@ impl Grid {
 	}
 
 	/// Expand the grid, relative to the origin.
-	pub fn set_bounds(&mut self, neg_x: u64, neg_y: u64, pos_x: u64, pos_y: u64) {
-		while self.origin.0 < neg_x {
+	pub fn set_bounds(&mut self, neg_x: usize, neg_y: usize, pos_x: usize, pos_y: usize) {
+		while self.origin.0 < neg_x as isize {
 			self.left_extend();
 		}
 
-		while self.origin.1 < neg_y {
+		while self.origin.1 < neg_y as isize {
 			self.top_extend();
 		}
 
-		while self.width() - self.origin.0 < pos_x {
+		while self.width().checked_sub_signed(self.origin.0).unwrap() < pos_x {
 			self.right_extend();
 		}
 
-		while self.height() - self.origin.1 < pos_y {
+		while self.height().checked_sub_signed(self.origin.1).unwrap() < pos_y {
 			self.bottom_extend();
 		}
 	}
 
+	/// Shrinks the table to be as small as possible (without loosing any data).
+	pub fn shrink(&mut self) {
+		if self.cells.len() <= 0 {
+			return;
+		}
+
+		let (x, y) = self.get_bounding_box();
+		dbg!(&x, &y);
+		dbg!(x.is_empty(), y.is_empty());
+		if x.is_empty() || y.is_empty() {
+			self.cells.clear();
+			self.origin = (0, 0);
+			return;
+		}
+
+		if !y.is_empty() {
+			self.origin.1 -= y.start as isize;
+
+			drop(self.cells.drain(y.end..));
+			drop(self.cells.drain(..y.start));
+		}
+		if !x.is_empty() {
+			self.origin.0 -= x.start as isize;
+
+			for row in self.cells.iter_mut() {
+				drop(row.drain(x.end..));
+				drop(row.drain(..x.start));
+			}
+		}
+	}
+
+	/// Get the bounding box of alive cells. Returns `(x, y)`.
+	pub fn get_bounding_box(&self) -> (Range<usize>, Range<usize>) {
+		if self.width() <= 0 || self.height() <= 0 {
+			return Default::default();
+		}
+
+		dbg!(&self);
+
+		let y_start = self.cells.iter().take_while(|row| !row.iter().any(|c| c.is_alive())).count();
+		let y_end = self.height() as usize - self.cells.iter().rev().take_while(|row| !row.iter().any(|c| c.is_alive())).count();
+		let y = y_start..y_end;
+
+		let width = self.width() as usize;
+		let x_start = (0..width).into_iter()
+			.take_while(|i| self.cells.iter().all(|row| !row[            *i].is_alive())).count();
+		let x_end = width - (0..width).into_iter()
+			.take_while(|i| self.cells.iter().all(|row| !row[width - 1 - *i].is_alive())).count();
+		let x = x_start..x_end;
+
+		return (x, y);
+	}
+
 	/// Get the origin point of the grid.
-	pub fn get_origin(&self) -> (u64, u64) {
+	pub fn get_origin(&self) -> (isize, isize) {
 		self.origin
 	}
 

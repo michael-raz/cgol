@@ -24,10 +24,10 @@ struct Viewer {
 impl Viewer {
 	fn update_bounds(&mut self) {
 		self.grid.set_bounds(
-			(self.camera_pos.0.min(0.0) / CELL_SIZE / self.scale).abs().ceil() as u64,
-			(self.camera_pos.1.min(0.0) / CELL_SIZE / self.scale).abs().ceil() as u64,
-			((self.viewport_dim.0 + self.camera_pos.0.max(0.0)) / CELL_SIZE / self.scale).ceil() as u64,
-			((self.viewport_dim.1 + self.camera_pos.1.max(0.0)) / CELL_SIZE / self.scale).ceil() as u64,
+			(self.camera_pos.0.min(0.0) / CELL_SIZE / self.scale).abs().ceil() as usize,
+			(self.camera_pos.1.min(0.0) / CELL_SIZE / self.scale).abs().ceil() as usize,
+			((self.viewport_dim.0 + self.camera_pos.0.max(0.0)) / CELL_SIZE / self.scale).ceil() as usize,
+			((self.viewport_dim.1 + self.camera_pos.1.max(0.0)) / CELL_SIZE / self.scale).ceil() as usize,
 		);
 	}
 
