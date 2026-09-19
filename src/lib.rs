@@ -19,14 +19,15 @@ struct Viewer {
 	grid: Grid,
 	viewport_dim: (f64, f64),
 	camera_pos: (f64, f64),
+	scale: f64,
 }
 impl Viewer {
 	fn update_bounds(&mut self) {
 		self.grid.set_bounds(
-			(self.camera_pos.0.min(0.0) / CELL_SIZE).abs().ceil() as u64,
-			(self.camera_pos.1.min(0.0) / CELL_SIZE).abs().ceil() as u64,
-			((self.viewport_dim.0 + self.camera_pos.0.max(0.0)) / CELL_SIZE).ceil() as u64,
-			((self.viewport_dim.1 + self.camera_pos.1.max(0.0)) / CELL_SIZE).ceil() as u64,
+			(self.camera_pos.0.min(0.0) / CELL_SIZE / self.scale).abs().ceil() as u64,
+			(self.camera_pos.1.min(0.0) / CELL_SIZE / self.scale).abs().ceil() as u64,
+			((self.viewport_dim.0 + self.camera_pos.0.max(0.0)) / CELL_SIZE / self.scale).ceil() as u64,
+			((self.viewport_dim.1 + self.camera_pos.1.max(0.0)) / CELL_SIZE / self.scale).ceil() as u64,
 		);
 	}
 }
@@ -70,9 +71,9 @@ fn draw(ctx: &CanvasRenderingContext2d, viewer: &mut Viewer) {
 
 			ctx.begin_path();
 			ctx.rect(
-				(CELL_SIZE + m) * j - viewer.camera_pos.0,
-				(CELL_SIZE + m) * i - viewer.camera_pos.1,
-				CELL_SIZE, CELL_SIZE,
+				size * j - viewer.camera_pos.0,
+				size * i - viewer.camera_pos.1,
+				size, size,
 			);
 			ctx.stroke();
 			ctx.fill();
@@ -101,6 +102,7 @@ pub fn run() {
 		grid,
 		viewport_dim: (0.0, 0.0),
 		camera_pos: (0.0, 0.0),
+		scale: 1.0,
 	};
 	let viewer = Arc::new(Mutex::new(viewer));
 	draw(ctx.clone().as_ref(), &mut viewer.lock().unwrap());
@@ -163,6 +165,34 @@ pub fn run() {
 	};
 	let c = wrap(onmouse);
 	canvas.add_event_listener_with_callback("mousemove", &c.as_ref().unchecked_ref()).unwrap();
+	c.forget();
+
+	let onscroll = {
+		let ctx = ctx.clone();
+		let viewer = viewer.clone();
+		move |e: WheelEvent|{
+			// let viewer: &mut Viewer = {
+			// 	viewer.try_lock
+			// }
+			let viewer = &mut viewer.lock().unwrap();
+
+			let mpos = (e.x() as f64, e.y() as f64);
+
+			let prev = viewer.scale;
+			let delta = viewer.scale * -0.1 * (e.delta_y()).signum();
+			viewer.scale += delta;
+
+			viewer.camera_pos.0 = (viewer.scale / prev) * (mpos.0 + viewer.camera_pos.0) - mpos.0;
+			viewer.camera_pos.1 = (viewer.scale / prev) * (mpos.1 + viewer.camera_pos.1) - mpos.1;
+
+			viewer.update_bounds();
+			draw(ctx.as_ref(), viewer);
+		}
+	};
+	let c = wrap(onscroll);
+	// TODO: _also_ use "mousewheel" event to support Safari
+	//       https://developer.mozilla.org/en-US/docs/Web/API/Element/mousewheel_event
+	canvas.add_event_listener_with_callback("wheel", &c.as_ref().unchecked_ref()).unwrap();
 	c.forget();
 
 	let update = {
