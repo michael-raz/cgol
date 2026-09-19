@@ -30,6 +30,19 @@ impl Viewer {
 			((self.viewport_dim.1 + self.camera_pos.1.max(0.0)) / CELL_SIZE / self.scale).ceil() as u64,
 		);
 	}
+
+	fn from_screen_space(&self, xy: (f64, f64)) -> (f64, f64) {
+		(
+			(xy.0 + self.camera_pos.0) / self.scale,
+			(xy.1 + self.camera_pos.1) / self.scale,
+		)
+	}
+	fn to_screen_space(&self, xy: (f64, f64)) -> (f64, f64) {
+		(
+			xy.0 * self.scale - self.camera_pos.0,
+			xy.1 * self.scale - self.camera_pos.1,
+		)
+	}
 }
 
 fn wrap<'a, T: FromWasmAbi, F: FnMut(T) + 'static>(callback: F) -> ScopedClosure<'a, dyn FnMut(T)> {
@@ -46,10 +59,22 @@ fn draw(ctx: &CanvasRenderingContext2d, viewer: &mut Viewer) {
 
 	let grid = &viewer.grid;
 
+	let mut start = viewer.from_screen_space((0.0, 0.0));
+	let mut end = viewer.from_screen_space(viewer.viewport_dim);
+
 	let cells = grid.get_cells();
-	let m = 0.0;
-	for (i, row) in cells.iter().enumerate() {
-		for (j, c) in row.iter().enumerate() {
+	let origin = grid.get_origin();
+	let size = CELL_SIZE * viewer.scale;
+
+	start.0 = (start.0 / CELL_SIZE + origin.0 as f64).floor();
+	start.1 = (start.1 / CELL_SIZE + origin.1 as f64).floor();
+	end.0 = (end.0 / CELL_SIZE + origin.0 as f64).ceil();
+	end.1 = (end.1 / CELL_SIZE + origin.1 as f64).ceil();
+
+	for i in start.1 as usize..end.1 as usize {
+		for j in start.0 as usize..end.0 as usize {
+			let c = &cells[i][j];
+
 			let color = if c.is_alive() {
 				"#f0f0f0"
 			} else {
