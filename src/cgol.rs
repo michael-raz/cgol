@@ -222,8 +222,6 @@ impl Grid {
 		}
 
 		let (x, y) = self.get_bounding_box();
-		dbg!(&x, &y);
-		dbg!(x.is_empty(), y.is_empty());
 		if x.is_empty() || y.is_empty() {
 			self.cells.clear();
 			self.origin = (0, 0);
@@ -252,8 +250,6 @@ impl Grid {
 			return Default::default();
 		}
 
-		dbg!(&self);
-
 		let y_start = self.cells.iter().take_while(|row| !row.iter().any(|c| c.is_alive())).count();
 		let y_end = self.height() as usize - self.cells.iter().rev().take_while(|row| !row.iter().any(|c| c.is_alive())).count();
 		let y = y_start..y_end;
@@ -276,6 +272,17 @@ impl Grid {
 	/// Get all of the cells that this grid manages.
 	pub fn get_cells(&self) -> &'_ Vec<Vec<Cell>> {
 		&self.cells
+	}
+
+	/// Initialize a grid using a table of 1's and 0's.
+	pub fn from_bits<const N: usize>(src: &[[u8; N]]) -> Self {
+		let alive = src.into_iter().flat_map(|row| row.into_iter()).enumerate()
+			.filter_map(|(i, &x)| (x > 0).then_some(((i % N) as u64, (i / N) as u64)));
+
+		alive.fold(Grid::new(0, 0), |mut out, (x, y)| {
+			out.set_cell(x, y, Cell::new(true));
+			out
+		})
 	}
 }
 

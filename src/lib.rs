@@ -119,10 +119,12 @@ pub fn run() {
 		.dyn_into::<CanvasRenderingContext2d>().unwrap();
 	let ctx = Arc::new(ctx);
 
-	let mut grid = Grid::new(16, 16);
-	grid.set_cell(1, 0, Cell::new(true));
-	grid.set_cell(1, 1, Cell::new(true));
-	grid.set_cell(1, 2, Cell::new(true));
+	let grid = Grid::from_bits(&[
+		[0, 1, 0, 0, 0, 0 ,0],
+		[0, 0, 0, 1, 0, 0 ,0],
+		[1, 1, 0, 0, 1, 1 ,1],
+	]);
+
 	let viewer = Viewer{
 		grid,
 		viewport_dim: (0.0, 0.0),
