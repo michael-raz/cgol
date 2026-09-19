@@ -156,7 +156,7 @@ pub fn run() {
 	w.add_event_listener_with_callback("resize", &c.as_ref().unchecked_ref()).unwrap();
 	c.forget();
 
-	let onmouse = {
+	let onmousemove = {
 		let mut pinpoint: Option<(f64, f64)> = None;
 
 		let ctx = ctx.clone();
@@ -169,13 +169,16 @@ pub fn run() {
 				e.y() as f64,
 			);
 
-			if pinpoint.is_none() && (e.buttons() & 1) > 0 {
+			let lmb = (e.buttons() & 1) > 0;
+			let shift = e.shift_key();
+
+			if pinpoint.is_none() && lmb && !shift {
 				let mut tmp = pos;
 				tmp.0 += viewer.camera_pos.0;
 				tmp.1 += viewer.camera_pos.1;
 
 				pinpoint = Some(tmp);
-			} else if (e.buttons() & 1) == 0 {
+			} else if !lmb {
 				pinpoint = None;
 			}
 
@@ -188,17 +191,45 @@ pub fn run() {
 			}
 		}
 	};
-	let c = wrap(onmouse);
+	let c = wrap(onmousemove);
 	canvas.add_event_listener_with_callback("mousemove", &c.as_ref().unchecked_ref()).unwrap();
+	c.forget();
+
+	let onmousedown = {
+		let ctx = ctx.clone();
+		let viewer = viewer.clone();
+		move |e: MouseEvent|{
+			let viewer: &mut Viewer = &mut viewer.lock().unwrap();
+
+			let pos = (
+				e.x() as f64,
+				e.y() as f64,
+			);
+
+			let lmb = (e.buttons() & 1) > 0;
+			let shift = e.shift_key();
+
+			if lmb && shift {
+				let origin = viewer.grid.get_origin();
+				let mut pos = viewer.from_screen_space(pos);
+				pos.0 = pos.0 / CELL_SIZE + origin.0 as f64;
+				pos.1 = pos.1 / CELL_SIZE + origin.1 as f64;
+
+				let alive = viewer.grid.get_cells()[pos.1 as usize][pos.0 as usize].is_alive();
+				viewer.grid.set_cell(pos.0 as u64, pos.1 as u64, Cell::new(!alive));
+
+				draw(ctx.as_ref(), viewer);
+			}
+		}
+	};
+	let c = wrap(onmousedown);
+	canvas.add_event_listener_with_callback("mousedown", &c.as_ref().unchecked_ref()).unwrap();
 	c.forget();
 
 	let onscroll = {
 		let ctx = ctx.clone();
 		let viewer = viewer.clone();
 		move |e: WheelEvent|{
-			// let viewer: &mut Viewer = {
-			// 	viewer.try_lock
-			// }
 			let viewer = &mut viewer.lock().unwrap();
 
 			let mpos = (e.x() as f64, e.y() as f64);
