@@ -156,10 +156,10 @@ impl Grid {
 	/// The format is a `u64` (all numbers are in little endian) that denotes the length of the
 	/// following array which; contains positions `(i64, i64)` for each living cell.
 	pub fn save(&self, out: &mut impl Write) -> io::Result<()> {
-		out.write_all(&(self.cells.len()).to_le_bytes())?;
+		out.write_all(&(self.cells.len() as u64).to_le_bytes())?;
 		for pos in self.cells.iter() {
-			out.write_all(&pos.x.to_le_bytes())?;
-			out.write_all(&pos.y.to_le_bytes())?;
+			out.write_all(&(pos.x as i64).to_le_bytes())?;
+			out.write_all(&(pos.y as i64).to_le_bytes())?;
 		}
 
 		return Ok(());
