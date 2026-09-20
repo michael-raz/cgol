@@ -50,11 +50,7 @@ fn draw(ctx: &CanvasRenderingContext2d, viewer: &mut Viewer) {
 	ctx.fill_rect(0.0, 0.0, width as f64, height as f64);
 	// ctx.clear_rect(0.0, 0.0, width as f64, height as f64);
 
-	let grid = &viewer.grid;
-
 	let size = CELL_SIZE * viewer.scale;
-
-
 
 	ctx.set_fill_style_str(ALIVE_COLOR);
 	for pos in viewer.grid.get_alive() {
@@ -172,7 +168,7 @@ pub fn run() {
 
 			if lmb && shift {
 				let pos = viewer.from_screen_space(pos);
-				let pos = ((pos.0 / CELL_SIZE) as i64, (pos.1 / CELL_SIZE) as i64).into();
+				let pos = ((pos.0 / CELL_SIZE).floor() as i64, (pos.1 / CELL_SIZE).floor() as i64).into();
 
 				let alive = viewer.grid.get_cell(&pos);
 				viewer.grid.set_cell(pos, !alive);
