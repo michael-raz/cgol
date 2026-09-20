@@ -8,17 +8,7 @@ use std::str::FromStr;
 
 use crate::cgol::*;
 use crate::wasm_helpers::*;
-
-
-
-macro_rules! println {
-	() => {
-		console::log_0();
-	};
-	($($arg:tt)*) => {
-		console::log_1(&format!($($arg)*).into());
-	};
-}
+use crate::wasm_helpers::println;
 
 
 
@@ -352,9 +342,83 @@ pub fn run() {
 		button
 	};
 
+	let save = {
+		let button = document.create_element("button").unwrap();
+		button.set_text_content(Some("Save"));
+
+		add_event("click", &button, {
+			let viewer = viewer.clone();
+			move |e: MouseEvent| {
+				let viewer = viewer.lock().unwrap();
+				let mut raw = vec![];
+				viewer.grid.save(&mut raw).unwrap();
+
+				use flate2::{Compression, read::ZlibEncoder};
+				use std::io::Read;
+
+				let mut bytes = vec![];
+				ZlibEncoder::new(&mut raw.as_slice(), Compression::best())
+					.read_to_end(&mut bytes).unwrap();
+
+				use base64::prelude::*;
+
+				let out = BASE64_STANDARD.encode(bytes);
+
+				let w = window().unwrap();
+				let nav = proto_get(&w, "navigator").unwrap();
+				let clip = proto_get(nav.dyn_ref().unwrap(), "clipboard").unwrap();
+				let write = proto_get(clip.dyn_ref().unwrap(), "writeText").unwrap();
+				let write = write.dyn_into::<Function>().unwrap();
+				write.call(&clip, (&out.into(),)).unwrap();
+			}
+		});
+
+		button
+	};
+
+	let load = {
+		let button = document.create_element("button").unwrap();
+		button.set_text_content(Some("Load"));
+
+		add_event("click", &button, {
+			let viewer = viewer.clone();
+			move |_: MouseEvent| {
+				let w = window().unwrap();
+				let nav = proto_get(&w, "navigator").unwrap();
+				let clip = proto_get(nav.dyn_ref().unwrap(), "clipboard").unwrap();
+				let read = proto_get(clip.dyn_ref().unwrap(), "readText").unwrap();
+				let read = read.dyn_into::<Function>().unwrap();
+				let text: Promise = read.call(&clip, ()).unwrap().dyn_into().unwrap();
+
+				let viewer = viewer.clone();
+
+				let c = wrap(move |text: JsValue| {
+					use base64::prelude::*;
+					use flate2::read::ZlibDecoder;
+					use std::io::Read;
+
+					let text = text.as_string().unwrap();
+					let bytes = BASE64_STANDARD.decode(text).unwrap();
+					let mut data = vec![];
+					ZlibDecoder::new(&mut bytes.as_slice())
+						.read_to_end(&mut data).unwrap();
+
+					let mut viewer = viewer.lock().unwrap();
+					viewer.grid = Grid::load(&mut data.as_slice()).unwrap();
+				});
+				let _ = text.then(&c);
+				c.forget();
+			}
+		});
+
+		button
+	};
+
 	controls.append_child(&slider).unwrap();
 	controls.append_child(&label).unwrap();
 	controls.append_child(&play_toggle).unwrap();
+	controls.append_child(&save).unwrap();
+	controls.append_child(&load).unwrap();
 
 	div.append_child(&controls).unwrap();
 }

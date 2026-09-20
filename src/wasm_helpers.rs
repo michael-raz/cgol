@@ -7,7 +7,20 @@ use std::borrow::Cow;
 
 
 
-fn wrap<'a, T: FromWasmAbi, F: FnMut(T) + 'static>(callback: F) -> ScopedClosure<'a, dyn FnMut(T)> {
+#[cfg(target_family="wasm")]
+macro_rules! println {
+	() => {
+		console::log_0();
+	};
+	($($arg:tt)*) => {
+		::web_sys::console::log_1(&format!($($arg)*).into());
+	};
+}
+pub(crate) use println;
+
+
+
+pub fn wrap<'a, T: FromWasmAbi, F: FnMut(T) + 'static>(callback: F) -> ScopedClosure<'a, dyn FnMut(T)> {
 	Closure::wrap(Box::new(callback) as Box<dyn FnMut(_)>)
 }
 
@@ -60,6 +73,10 @@ pub fn proto_get(obj: &Object, key: &str) -> Option<JsValue> {
 		let has = Object::has_own(&obj, key);
 		if has {
 			let desc = Object::get_own_property_descriptor_str(&obj, key).unwrap();
+			let value = desc.get_value();
+			if value.is_some() {
+				return value;
+			}
 
 			let getter = desc.get_get().unwrap();
 			let value = getter.call(&root, ()).unwrap();
@@ -85,7 +102,7 @@ pub fn proto_set(obj: &Object, key: &str, value: &JsValue) -> Option<()> {
 			let desc = Object::get_own_property_descriptor_str(&obj, key).unwrap();
 
 			let getter = desc.get_set().unwrap();
-			let value = getter.call(&root, (value,)).unwrap();
+			getter.call(&root, (value,)).unwrap();
 
 			return Some(());
 		}
