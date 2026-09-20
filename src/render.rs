@@ -79,15 +79,11 @@ impl<F: Fn() + 'static> DynamicInterval<F> {
 		Self::repeat(me);
 	}
 }
-struct Page {
-	canvas: HtmlCanvasElement,
-	slider: Element,
-	tick_rate: Element,
-}
 
 struct Viewer {
 	grid: Grid,
 	ctx: CanvasRenderingContext2d,
+	paused: bool,
 
 	viewport_dim: (u32, u32),
 	camera_pos: (f64, f64),
@@ -100,6 +96,7 @@ impl Viewer {
 		Self {
 			grid,
 			ctx,
+			paused: true,
 			viewport_dim: (0, 0),
 			camera_pos: (0.0, 0.0),
 			scale: 1.0,
@@ -138,7 +135,7 @@ impl Viewer {
 }
 
 macro_rules! set_styles {
-	($elm:expr, { $($name:literal = $value:expr);* $(;)? }) => {{
+	($elm:expr, { $($name:literal: $value:expr);* $(;)? }) => {{
 		let style = proto_get($elm, "style").and_then(|js| js.dyn_into::<Object>().ok()).unwrap();
 		$( proto_set(&style, $name, &$value.into()).unwrap(); )*
 	}};
@@ -151,10 +148,10 @@ pub fn run() {
 
 	let div = document.create_element("div").unwrap();
 	set_styles!(&div, {
-		"display" = "flex";
-		"flex-direction" = "column";
-		"width" = "100%";
-		"height" = "100%";
+		"display": "flex";
+		"flex-direction": "column";
+		"width": "100%";
+		"height": "100%";
 	});
 
 	let canvas = Arc::new(document.create_element("canvas").unwrap()
@@ -162,8 +159,8 @@ pub fn run() {
 	div.append_child(&canvas).unwrap();
 
 	set_styles!(&canvas, {
-		"width" = "100%";
-		"height" = "100%";
+		"width": "100%";
+		"height": "100%";
 	});
 
 	body.append_child(&div).unwrap();
@@ -292,33 +289,72 @@ pub fn run() {
 		}
 	});
 
+	fn from_slider(src: i32) -> Option<i32> {
+		(src != 0).then(|| 50_000 / src / src)
+	}
+
+	const DEFAULT_SLIDE: i32 = 10;
+
 	let di = DynamicInterval::new(w, {
 		let viewer = viewer.clone();
 		move || {
 			let viewer: &mut Viewer = &mut viewer.lock().unwrap();
-			viewer.grid.step(1);
-			viewer.draw();
+			if !viewer.paused {
+				viewer.grid.step(1);
+				viewer.draw();
+			}
 		}
 	}, None);
-	DynamicInterval::set_rate(di.clone(), Some(50));
+	DynamicInterval::set_rate(di.clone(), from_slider(DEFAULT_SLIDE));
+
+	let controls = document.create_element("div").unwrap();
+
+	let label = Arc::new(document.create_element("span").unwrap());
 
 	let slider = document.create_element("input").unwrap();
 	proto_set(&slider, "type", &"range".into()).unwrap();
+	proto_set(&slider, "value", &DEFAULT_SLIDE.into()).unwrap();
 	add_event("input", &slider, {
+		let di = di.clone();
+		let label = label.clone();
 		move |e: Event| {
 			let t = e.target().unwrap();
 
 			let value = proto_get(t.as_ref(), "value").unwrap();
 			let value = i32::from_str(&value.as_string().unwrap()).unwrap();
+			let value = from_slider(value);
 
-			if value <= 0 {
-				DynamicInterval::set_rate(di.clone(), None);
-			}
+			label.set_text_content(Some(&(if let Some(value) = value {
+				format!("{:>5.2}", 1000.0 / value as f64)
+			} else {
+				"N/A".to_string()
+			})));
 
-			let value = 1_000 / value;
-			DynamicInterval::set_rate(di.clone(), Some(value));
+			DynamicInterval::set_rate(di.clone(), value);
 		}
 	});
 
-	div.append_child(&slider).unwrap();
+	let play_toggle = {
+		let button = document.create_element("button").unwrap();
+		button.set_text_content(Some("Play"));
+
+		add_event("click", &button, {
+			let viewer = viewer.clone();
+			move |e: MouseEvent| {
+				let mut viewer = viewer.lock().unwrap();
+				viewer.paused = !viewer.paused;
+
+				let node: Node = e.target().unwrap().dyn_into().unwrap();
+				node.set_text_content(Some(if viewer.paused { "Play" } else { "Pause" }));
+			}
+		});
+
+		button
+	};
+
+	controls.append_child(&slider).unwrap();
+	controls.append_child(&label).unwrap();
+	controls.append_child(&play_toggle).unwrap();
+
+	div.append_child(&controls).unwrap();
 }
