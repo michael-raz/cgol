@@ -6,14 +6,14 @@ It's intended to be a web app that can also run natively on Linux (maybe Windows
 
 ## Features
 - [x] Infinite canvas
-- [ ] Save state (as something like a base64 string if possible)
+- [x] Save state (in base64 using clipboard)
 - [ ] QOL for the editor
 	- [ ] Undo and redo
 	- [ ] Rectangle selection
 	- [ ] Copy-paste
 	- [ ] Blueprints
 - [ ] Coloring
-- [ ] Adjustable play rate with pause/unpause
+- [x] Adjustable play rate with pause/unpause
 - [ ] Custom rules via rulestrings (i.e. different "universes")
 - [ ] Provide library bindings
 - [ ] Reverse search (low priority)
