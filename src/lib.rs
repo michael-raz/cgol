@@ -22,15 +22,6 @@ struct Viewer {
 	scale: f64,
 }
 impl Viewer {
-	fn update_bounds(&mut self) {
-		self.grid.set_bounds(
-			(self.camera_pos.0.min(0.0) / CELL_SIZE / self.scale).abs().ceil() as usize,
-			(self.camera_pos.1.min(0.0) / CELL_SIZE / self.scale).abs().ceil() as usize,
-			((self.viewport_dim.0 + self.camera_pos.0.max(0.0)) / CELL_SIZE / self.scale).ceil() as usize,
-			((self.viewport_dim.1 + self.camera_pos.1.max(0.0)) / CELL_SIZE / self.scale).ceil() as usize,
-		);
-	}
-
 	fn from_screen_space(&self, xy: (f64, f64)) -> (f64, f64) {
 		(
 			(xy.0 + self.camera_pos.0) / self.scale,
@@ -61,38 +52,17 @@ fn draw(ctx: &CanvasRenderingContext2d, viewer: &mut Viewer) {
 
 	let grid = &viewer.grid;
 
-	let cells = grid.get_cells();
-	let origin = grid.get_origin();
 	let size = CELL_SIZE * viewer.scale;
 
-	let mut start = viewer.from_screen_space((0.0, 0.0));
-	let mut end = viewer.from_screen_space(viewer.viewport_dim);
 
-	start.0 = (start.0 / CELL_SIZE + origin.0 as f64).floor();
-	start.1 = (start.1 / CELL_SIZE + origin.1 as f64).floor();
-	end.0 = (end.0 / CELL_SIZE + origin.0 as f64).ceil();
-	end.1 = (end.1 / CELL_SIZE + origin.1 as f64).ceil();
-
-	let rows = viewer.grid.height().min(start.1 as usize)..viewer.grid.height().min(end.1 as usize);
-	let cols = viewer.grid.width().min(start.0 as usize)..viewer.grid.width().min(end.0 as usize);
 
 	ctx.set_fill_style_str(ALIVE_COLOR);
-	for i in rows {
-		for j in cols.clone() {
-			let c = &cells[i][j];
-			if !c.is_alive() {
-				continue;
-			}
-
-			let i = i as f64 - grid.get_origin().1 as f64;
-			let j = j as f64 - grid.get_origin().0 as f64;
-
-			ctx.fill_rect(
-				size * j - viewer.camera_pos.0,
-				size * i - viewer.camera_pos.1,
-				size, size,
-			);
-		}
+	for pos in viewer.grid.get_alive() {
+		ctx.fill_rect(
+			size * (pos.x as f64) - viewer.camera_pos.0,
+			size * (pos.y as f64) - viewer.camera_pos.1,
+			size, size,
+		);
 	}
 }
 
@@ -201,13 +171,11 @@ pub fn run() {
 			let shift = e.shift_key();
 
 			if lmb && shift {
-				let origin = viewer.grid.get_origin();
-				let mut pos = viewer.from_screen_space(pos);
-				pos.0 = pos.0 / CELL_SIZE + origin.0 as f64;
-				pos.1 = pos.1 / CELL_SIZE + origin.1 as f64;
+				let pos = viewer.from_screen_space(pos);
+				let pos = ((pos.0 / CELL_SIZE) as i64, (pos.1 / CELL_SIZE) as i64).into();
 
-				let alive = viewer.grid.get_cell(pos.0 as usize, pos.1 as usize).map(|c| c.is_alive()).unwrap_or(false);
-				viewer.grid.set_cell(pos.0 as u64, pos.1 as u64, Cell::new(!alive));
+				let alive = viewer.grid.get_cell(&pos);
+				viewer.grid.set_cell(pos, !alive);
 
 				draw(ctx.as_ref(), viewer);
 			}
@@ -246,7 +214,7 @@ pub fn run() {
 		let viewer = viewer.clone();
 		move |_: Event|{
 			let viewer: &mut Viewer = &mut viewer.lock().unwrap();
-			viewer.grid.advance();
+			viewer.grid.step(1);
 			draw(ctx.as_ref(), viewer);
 		}
 	};
