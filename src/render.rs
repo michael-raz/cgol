@@ -1,16 +1,22 @@
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::convert::*;
 use web_sys::*;
+use js_sys::*;
 
 use std::sync::{Arc, Mutex};
+use std::str::FromStr;
 
 use crate::cgol::*;
+use crate::wasm_helpers::*;
 
 
 
-macro_rules! consolelog {
-	($($e:expr),+ $(,)?) => {
-		console::log_1(&format!($($e),+).into())
+macro_rules! println {
+	() => {
+		console::log_0();
+	};
+	($($arg:tt)*) => {
+		console::log_1(&format!($($arg)*).into());
 	};
 }
 
@@ -18,11 +24,72 @@ macro_rules! consolelog {
 
 const CELL_SIZE: f64 = 50.0;
 
+struct DynamicInterval<F: Fn() + 'static> {
+	rate: Option<u64>,
+	callback: F,
+	window: Window,
+	prev: Option<i32>,
+}
+impl<F: Fn() + 'static> DynamicInterval<F> {
+	fn new(window: Window, callback: F, rate: Option<u64>) -> Arc<Mutex<Self>> {
+		let out = Arc::new(Mutex::new(Self {
+			rate,
+			callback,
+			window,
+			prev: None,
+		}));
+
+		Self::repeat(out.clone());
+
+		return out;
+	}
+
+	fn repeat<T: Fn() + 'static>(me: Arc<Mutex<DynamicInterval<T>>>){
+		let mut locked = me.lock().unwrap();
+		if let Some(rate) = locked.rate {
+			let cur = set_timeout(&locked.window, {
+				let me = me.clone();
+				move |_: Event| {
+					(me.lock().unwrap().callback)();
+					Self::repeat(me.clone());
+				}
+			}, rate as i32).unwrap();
+			locked.prev.replace(cur);
+		} else {
+			locked.prev.take();
+		}
+	}
+
+	fn set_rate(me: Arc<Mutex<Self>>, rate: Option<i32>) {
+		let rate = rate.map(|n| n as u64);
+
+		let mut locked = me.lock().unwrap();
+		if locked.rate == rate {
+			return;
+		} else {
+			locked.rate = rate;
+		}
+
+		if let Some(prev) = locked.prev {
+			locked.window.clear_timeout_with_handle(prev);
+		}
+
+		drop(locked);
+
+		Self::repeat(me);
+	}
+}
+struct Page {
+	canvas: HtmlCanvasElement,
+	slider: Element,
+	tick_rate: Element,
+}
+
 struct Viewer {
 	grid: Grid,
 	ctx: CanvasRenderingContext2d,
 
-	viewport_dim: (f64, f64),
+	viewport_dim: (u32, u32),
 	camera_pos: (f64, f64),
 	scale: f64,
 
@@ -33,7 +100,7 @@ impl Viewer {
 		Self {
 			grid,
 			ctx,
-			viewport_dim: (0.0, 0.0),
+			viewport_dim: (0, 0),
 			camera_pos: (0.0, 0.0),
 			scale: 1.0,
 			cursor_pin: None,
@@ -70,40 +137,36 @@ impl Viewer {
 	}
 }
 
-fn wrap<'a, T: FromWasmAbi, F: FnMut(T) + 'static>(callback: F) -> ScopedClosure<'a, dyn FnMut(T)> {
-	Closure::wrap(Box::new(callback) as Box<dyn FnMut(_)>)
-}
-
-fn add_event<T, E, F>(name: &'static str, target: &T, callback: F)
-	where
-		T: AsRef<EventTarget>,
-		E: FromWasmAbi,
-		F: FnMut(E) + 'static,
-{
-	let c = wrap(callback);
-	target.as_ref().add_event_listener_with_callback(name, &c.as_ref().unchecked_ref()).unwrap();
-	c.forget();
-}
-
-fn set_interval<E, F>(target: &Window, callback: F, rate: i32)
-	where
-		E: FromWasmAbi,
-		F: FnMut(E) + 'static,
-{
-	let c = wrap(callback);
-	target.set_interval_with_callback_and_timeout_and_arguments_0(
-		&c.as_ref().unchecked_ref(), rate,
-	).unwrap();
-	c.forget();
+macro_rules! set_styles {
+	($elm:expr, { $($name:literal = $value:expr);* $(;)? }) => {{
+		let style = proto_get($elm, "style").and_then(|js| js.dyn_into::<Object>().ok()).unwrap();
+		$( proto_set(&style, $name, &$value.into()).unwrap(); )*
+	}};
 }
 
 pub fn run() {
 	let w = window().unwrap();
 	let document = w.document().unwrap();
+	let body = document.body().unwrap();
 
-	let canvas = document.query_selector("canvas").unwrap().unwrap()
-		.dyn_into::<HtmlCanvasElement>().unwrap();
-	let canvas = Arc::new(canvas);
+	let div = document.create_element("div").unwrap();
+	set_styles!(&div, {
+		"display" = "flex";
+		"flex-direction" = "column";
+		"width" = "100%";
+		"height" = "100%";
+	});
+
+	let canvas = Arc::new(document.create_element("canvas").unwrap()
+		.dyn_into::<HtmlCanvasElement>().unwrap());
+	div.append_child(&canvas).unwrap();
+
+	set_styles!(&canvas, {
+		"width" = "100%";
+		"height" = "100%";
+	});
+
+	body.append_child(&div).unwrap();
 
 	let ctx = canvas.get_context("2d").unwrap().unwrap()
 		.dyn_into::<CanvasRenderingContext2d>().unwrap();
@@ -120,18 +183,21 @@ pub fn run() {
 	viewer.lock().unwrap().draw();
 
 	let onresize = {
-		let w = w.window();
 		let viewer = viewer.clone();
 		let canvas = canvas.clone();
 		move |_: Event|{
-			let width = w.inner_width().unwrap().as_f64().unwrap();
-			let height = w.inner_height().unwrap().as_f64().unwrap();
-
 			let viewer: &mut Viewer = &mut viewer.lock().unwrap();
-			viewer.viewport_dim = (width, height);
 
-			canvas.set_width(width as u32);
-			canvas.set_height(height as u32);
+			let width = canvas.client_width() as u32;
+			let height = canvas.client_height() as u32;
+			if viewer.viewport_dim.0 == width && viewer.viewport_dim.1 == height {
+				return;
+			}
+
+			viewer.viewport_dim = (width, height);
+			canvas.set_width(width);
+			canvas.set_height(height);
+
 			viewer.draw();
 		}
 	};
@@ -176,8 +242,8 @@ pub fn run() {
 			let viewer: &mut Viewer = &mut viewer.lock().unwrap();
 
 			let pos = (
-				e.x() as f64,
-				e.y() as f64,
+				e.offset_x() as f64,
+				e.offset_y() as f64,
 			);
 
 			let lmb = (e.buttons() & 1) > 0;
@@ -205,7 +271,7 @@ pub fn run() {
 		move |e: WheelEvent|{
 			let viewer = &mut viewer.lock().unwrap();
 
-			let mpos = (e.x() as f64, e.y() as f64);
+			let mpos = (e.offset_x() as f64, e.offset_y() as f64);
 
 			let prev = viewer.scale;
 			let delta = viewer.scale * -0.1 * (e.delta_y()).signum();
@@ -226,12 +292,33 @@ pub fn run() {
 		}
 	});
 
-	set_interval(&w, {
+	let di = DynamicInterval::new(w, {
 		let viewer = viewer.clone();
-		move |_: Event|{
+		move || {
 			let viewer: &mut Viewer = &mut viewer.lock().unwrap();
 			viewer.grid.step(1);
 			viewer.draw();
 		}
-	}, 500);
+	}, None);
+	DynamicInterval::set_rate(di.clone(), Some(50));
+
+	let slider = document.create_element("input").unwrap();
+	proto_set(&slider, "type", &"range".into()).unwrap();
+	add_event("input", &slider, {
+		move |e: Event| {
+			let t = e.target().unwrap();
+
+			let value = proto_get(t.as_ref(), "value").unwrap();
+			let value = i32::from_str(&value.as_string().unwrap()).unwrap();
+
+			if value <= 0 {
+				DynamicInterval::set_rate(di.clone(), None);
+			}
+
+			let value = 1_000 / value;
+			DynamicInterval::set_rate(di.clone(), Some(value));
+		}
+	});
+
+	div.append_child(&slider).unwrap();
 }
