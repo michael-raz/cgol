@@ -61,6 +61,29 @@ fn wrap<'a, T: FromWasmAbi, F: FnMut(T) + 'static>(callback: F) -> ScopedClosure
 	Closure::wrap(Box::new(callback) as Box<dyn FnMut(_)>)
 }
 
+fn add_event<T, E, F>(name: &'static str, target: &T, callback: F)
+	where
+		T: AsRef<EventTarget>,
+		E: FromWasmAbi,
+		F: FnMut(E) + 'static,
+{
+	let c = wrap(callback);
+	target.as_ref().add_event_listener_with_callback(name, &c.as_ref().unchecked_ref()).unwrap();
+	c.forget();
+}
+
+fn set_interval<E, F>(target: &Window, callback: F, rate: i32)
+	where
+		E: FromWasmAbi,
+		F: FnMut(E) + 'static,
+{
+	let c = wrap(callback);
+	target.set_interval_with_callback_and_timeout_and_arguments_0(
+		&c.as_ref().unchecked_ref(), rate,
+	).unwrap();
+	c.forget();
+}
+
 pub fn run() {
 	let w = window().unwrap();
 	let document = w.document().unwrap();
@@ -106,12 +129,9 @@ pub fn run() {
 		}
 	};
 	onresize(Event::new("resize").unwrap());
+	add_event("resize", &w, onresize);
 
-	let c = wrap(onresize);
-	w.add_event_listener_with_callback("resize", &c.as_ref().unchecked_ref()).unwrap();
-	c.forget();
-
-	let onmousemove = {
+	add_event("mousemove", canvas.as_ref(), {
 		let mut pinpoint: Option<(f64, f64)> = None;
 
 		let viewer = viewer.clone();
@@ -143,12 +163,9 @@ pub fn run() {
 				viewer.draw();
 			}
 		}
-	};
-	let c = wrap(onmousemove);
-	canvas.add_event_listener_with_callback("mousemove", &c.as_ref().unchecked_ref()).unwrap();
-	c.forget();
+	});
 
-	let onmousedown = {
+	add_event("mousedown", canvas.as_ref(), {
 		let viewer = viewer.clone();
 		move |e: MouseEvent|{
 			let viewer: &mut Viewer = &mut viewer.lock().unwrap();
@@ -174,12 +191,11 @@ pub fn run() {
 				viewer.draw();
 			}
 		}
-	};
-	let c = wrap(onmousedown);
-	canvas.add_event_listener_with_callback("mousedown", &c.as_ref().unchecked_ref()).unwrap();
-	c.forget();
+	});
 
-	let onscroll = {
+	// TODO: _also_ use "mousewheel" event to support Safari
+	//       https://developer.mozilla.org/en-US/docs/Web/API/Element/mousewheel_event
+	add_event("wheel", canvas.as_ref(), {
 		let viewer = viewer.clone();
 		move |e: WheelEvent|{
 			let viewer = &mut viewer.lock().unwrap();
@@ -195,22 +211,14 @@ pub fn run() {
 
 			viewer.draw();
 		}
-	};
-	let c = wrap(onscroll);
-	// TODO: _also_ use "mousewheel" event to support Safari
-	//       https://developer.mozilla.org/en-US/docs/Web/API/Element/mousewheel_event
-	canvas.add_event_listener_with_callback("wheel", &c.as_ref().unchecked_ref()).unwrap();
-	c.forget();
+	});
 
-	let update = {
+	set_interval(&w, {
 		let viewer = viewer.clone();
 		move |_: Event|{
 			let viewer: &mut Viewer = &mut viewer.lock().unwrap();
 			viewer.grid.step(1);
 			viewer.draw();
 		}
-	};
-	let c = wrap(update);
-	w.set_interval_with_callback_and_timeout_and_arguments_0(&c.as_ref().unchecked_ref(), 500).unwrap();
-	c.forget();
+	}, 500);
 }
