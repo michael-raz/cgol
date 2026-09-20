@@ -25,8 +25,21 @@ struct Viewer {
 	viewport_dim: (f64, f64),
 	camera_pos: (f64, f64),
 	scale: f64,
+
+	cursor_pin: Option<(f64, f64)>,
 }
 impl Viewer {
+	fn new(grid: Grid, ctx: CanvasRenderingContext2d) -> Self {
+		Self {
+			grid,
+			ctx,
+			viewport_dim: (0.0, 0.0),
+			camera_pos: (0.0, 0.0),
+			scale: 1.0,
+			cursor_pin: None,
+		}
+	}
+
 	fn from_screen_space(&self, xy: (f64, f64)) -> (f64, f64) {
 		(
 			(xy.0 + self.camera_pos.0) / self.scale,
@@ -102,13 +115,7 @@ pub fn run() {
 		[1, 1, 0, 0, 1, 1 ,1],
 	]);
 
-	let viewer = Viewer{
-		grid,
-		ctx,
-		viewport_dim: (0.0, 0.0),
-		camera_pos: (0.0, 0.0),
-		scale: 1.0,
-	};
+	let viewer = Viewer::new(grid, ctx);
 	let viewer = Arc::new(Mutex::new(viewer));
 	viewer.lock().unwrap().draw();
 
@@ -132,13 +139,11 @@ pub fn run() {
 	add_event("resize", &w, onresize);
 
 	add_event("mousemove", canvas.as_ref(), {
-		let mut pinpoint: Option<(f64, f64)> = None;
-
 		let viewer = viewer.clone();
 		move |e: MouseEvent|{
 			let viewer: &mut Viewer = &mut viewer.lock().unwrap();
 
-			let pos = (
+			let mpos = (
 				e.x() as f64,
 				e.y() as f64,
 			);
@@ -146,19 +151,19 @@ pub fn run() {
 			let lmb = (e.buttons() & 1) > 0;
 			let shift = e.shift_key();
 
-			if pinpoint.is_none() && lmb && !shift {
-				let mut tmp = pos;
+			if viewer.cursor_pin.is_none() && lmb && !shift {
+				let mut tmp = mpos;
 				tmp.0 += viewer.camera_pos.0;
 				tmp.1 += viewer.camera_pos.1;
 
-				pinpoint = Some(tmp);
+				viewer.cursor_pin = Some(tmp);
 			} else if !lmb {
-				pinpoint = None;
+				viewer.cursor_pin = None;
 			}
 
-			if let Some(pinpoint) = pinpoint {
-				viewer.camera_pos.0 = pinpoint.0 - pos.0;
-				viewer.camera_pos.1 = pinpoint.1 - pos.1;
+			if let Some(pinpoint) = viewer.cursor_pin {
+				viewer.camera_pos.0 = pinpoint.0 - mpos.0;
+				viewer.camera_pos.1 = pinpoint.1 - mpos.1;
 
 				viewer.draw();
 			}
@@ -206,8 +211,16 @@ pub fn run() {
 			let delta = viewer.scale * -0.1 * (e.delta_y()).signum();
 			viewer.scale += delta;
 
+			let before = viewer.camera_pos;
 			viewer.camera_pos.0 = (viewer.scale / prev) * (mpos.0 + viewer.camera_pos.0) - mpos.0;
 			viewer.camera_pos.1 = (viewer.scale / prev) * (mpos.1 + viewer.camera_pos.1) - mpos.1;
+
+			if let Some(mut tmp) = viewer.cursor_pin {
+				tmp.0 -= before.0 - viewer.camera_pos.0;
+				tmp.1 -= before.1 - viewer.camera_pos.1;
+
+				viewer.cursor_pin = Some(tmp);
+			}
 
 			viewer.draw();
 		}
