@@ -20,6 +20,8 @@ const CELL_SIZE: f64 = 50.0;
 
 struct Viewer {
 	grid: Grid,
+	ctx: CanvasRenderingContext2d,
+
 	viewport_dim: (f64, f64),
 	camera_pos: (f64, f64),
 	scale: f64,
@@ -31,37 +33,32 @@ impl Viewer {
 			(xy.1 + self.camera_pos.1) / self.scale,
 		)
 	}
-	fn to_screen_space(&self, xy: (f64, f64)) -> (f64, f64) {
-		(
-			xy.0 * self.scale - self.camera_pos.0,
-			xy.1 * self.scale - self.camera_pos.1,
-		)
+
+	fn draw(&self) {
+		let (width, height) = self.viewport_dim;
+
+		const DEAD_COLOR:  &str = "#0f0f0f";
+		const ALIVE_COLOR: &str = "#f0f0f0";
+
+		self.ctx.set_fill_style_str(DEAD_COLOR);
+		self.ctx.fill_rect(0.0, 0.0, width as f64, height as f64);
+		// ctx.clear_rect(0.0, 0.0, width as f64, height as f64);
+
+		let size = CELL_SIZE * self.scale;
+
+		self.ctx.set_fill_style_str(ALIVE_COLOR);
+		for pos in self.grid.get_alive() {
+			self.ctx.fill_rect(
+				size * (pos.x as f64) - self.camera_pos.0,
+				size * (pos.y as f64) - self.camera_pos.1,
+				size, size,
+			);
+		}
 	}
 }
+
 fn wrap<'a, T: FromWasmAbi, F: FnMut(T) + 'static>(callback: F) -> ScopedClosure<'a, dyn FnMut(T)> {
 	Closure::wrap(Box::new(callback) as Box<dyn FnMut(_)>)
-}
-
-fn draw(ctx: &CanvasRenderingContext2d, viewer: &mut Viewer) {
-	let (width, height) = viewer.viewport_dim;
-
-	const DEAD_COLOR:  &str = "#0f0f0f";
-	const ALIVE_COLOR: &str = "#f0f0f0";
-
-	ctx.set_fill_style_str(DEAD_COLOR);
-	ctx.fill_rect(0.0, 0.0, width as f64, height as f64);
-	// ctx.clear_rect(0.0, 0.0, width as f64, height as f64);
-
-	let size = CELL_SIZE * viewer.scale;
-
-	ctx.set_fill_style_str(ALIVE_COLOR);
-	for pos in viewer.grid.get_alive() {
-		ctx.fill_rect(
-			size * (pos.x as f64) - viewer.camera_pos.0,
-			size * (pos.y as f64) - viewer.camera_pos.1,
-			size, size,
-		);
-	}
 }
 
 pub fn run() {
@@ -74,7 +71,6 @@ pub fn run() {
 
 	let ctx = canvas.get_context("2d").unwrap().unwrap()
 		.dyn_into::<CanvasRenderingContext2d>().unwrap();
-	let ctx = Arc::new(ctx);
 
 	// acorn
 	let grid = Grid::from_bits(&[
@@ -85,15 +81,15 @@ pub fn run() {
 
 	let viewer = Viewer{
 		grid,
+		ctx,
 		viewport_dim: (0.0, 0.0),
 		camera_pos: (0.0, 0.0),
 		scale: 1.0,
 	};
 	let viewer = Arc::new(Mutex::new(viewer));
-	draw(ctx.clone().as_ref(), &mut viewer.lock().unwrap());
+	viewer.lock().unwrap().draw();
 
 	let onresize = {
-		let ctx = ctx.clone();
 		let w = w.window();
 		let viewer = viewer.clone();
 		let canvas = canvas.clone();
@@ -106,7 +102,7 @@ pub fn run() {
 
 			canvas.set_width(width as u32);
 			canvas.set_height(height as u32);
-			draw(ctx.as_ref(), viewer);
+			viewer.draw();
 		}
 	};
 	onresize(Event::new("resize").unwrap());
@@ -118,7 +114,6 @@ pub fn run() {
 	let onmousemove = {
 		let mut pinpoint: Option<(f64, f64)> = None;
 
-		let ctx = ctx.clone();
 		let viewer = viewer.clone();
 		move |e: MouseEvent|{
 			let viewer: &mut Viewer = &mut viewer.lock().unwrap();
@@ -145,7 +140,7 @@ pub fn run() {
 				viewer.camera_pos.0 = pinpoint.0 - pos.0;
 				viewer.camera_pos.1 = pinpoint.1 - pos.1;
 
-				draw(ctx.as_ref(), viewer);
+				viewer.draw();
 			}
 		}
 	};
@@ -154,7 +149,6 @@ pub fn run() {
 	c.forget();
 
 	let onmousedown = {
-		let ctx = ctx.clone();
 		let viewer = viewer.clone();
 		move |e: MouseEvent|{
 			let viewer: &mut Viewer = &mut viewer.lock().unwrap();
@@ -169,12 +163,15 @@ pub fn run() {
 
 			if lmb && shift {
 				let pos = viewer.from_screen_space(pos);
-				let pos = ((pos.0 / CELL_SIZE).floor() as i64, (pos.1 / CELL_SIZE).floor() as i64).into();
+				let pos = (
+					(pos.0 / CELL_SIZE).floor() as i64,
+					(pos.1 / CELL_SIZE).floor() as i64,
+				).into();
 
 				let alive = viewer.grid.get_cell(&pos);
 				viewer.grid.set_cell(pos, !alive);
 
-				draw(ctx.as_ref(), viewer);
+				viewer.draw();
 			}
 		}
 	};
@@ -183,7 +180,6 @@ pub fn run() {
 	c.forget();
 
 	let onscroll = {
-		let ctx = ctx.clone();
 		let viewer = viewer.clone();
 		move |e: WheelEvent|{
 			let viewer = &mut viewer.lock().unwrap();
@@ -197,7 +193,7 @@ pub fn run() {
 			viewer.camera_pos.0 = (viewer.scale / prev) * (mpos.0 + viewer.camera_pos.0) - mpos.0;
 			viewer.camera_pos.1 = (viewer.scale / prev) * (mpos.1 + viewer.camera_pos.1) - mpos.1;
 
-			draw(ctx.as_ref(), viewer);
+			viewer.draw();
 		}
 	};
 	let c = wrap(onscroll);
@@ -207,12 +203,11 @@ pub fn run() {
 	c.forget();
 
 	let update = {
-		let ctx = ctx.clone();
 		let viewer = viewer.clone();
 		move |_: Event|{
 			let viewer: &mut Viewer = &mut viewer.lock().unwrap();
 			viewer.grid.step(1);
-			draw(ctx.as_ref(), viewer);
+			viewer.draw();
 		}
 	};
 	let c = wrap(update);
