@@ -9,7 +9,7 @@ It's intended to be a web app that can also run natively on Linux (maybe Windows
 - [x] Save state (in base64 using clipboard)
 - [ ] QOL for the editor
 	- [ ] Undo and redo
-	- [ ] Rectangle selection
+	- [x] Rectangle selection
 	- [ ] Copy-paste
 	- [ ] Blueprints
 - [ ] Coloring
