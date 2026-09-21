@@ -16,8 +16,8 @@ pub(crate) use set_style;
 
 
 
-pub struct WrappedHtml {
-	raw: Element,
+pub struct WrappedHtml<T=Element> {
+	raw: T,
 }
 impl WrappedHtml {
 	pub fn new(tag: &'static str) -> Result<Self, JsValue> {
@@ -28,18 +28,30 @@ impl WrappedHtml {
 
 		return Ok(Self{raw: elm});
 	}
+}
 
+impl<H: AsRef<JsValue>> WrappedHtml<H>{
+	pub fn as_elm<T: JsCast>(&self) -> Option<&'_ T> {
+		self.raw.as_ref().dyn_ref()
+	}
+}
+
+impl<H: AsRef<Node>> WrappedHtml<H>{
+	pub fn append_child(&self, child: &Self) -> Result<Node, JsValue> {
+		self.raw.as_ref().append_child(child.raw.as_ref())
+	}
+}
+
+impl<H: AsRef<Object>> WrappedHtml<H>{
 	pub fn get(&self, key: &str) -> Option<JsValue> {
-		proto_get(&self.raw, key)
+		proto_get(self.raw.as_ref(), key)
 	}
 	pub fn set(&self, key: &str, value: &JsValue) -> Option<()> {
-		proto_set(&self.raw, key, value.as_ref())
+		proto_set(self.raw.as_ref(), key, value.as_ref())
 	}
+}
 
-	pub fn append_child(&self, child: &Self) -> Result<Node, JsValue> {
-		self.raw.append_child(child.raw.as_ref())
-	}
-
+impl<H: AsRef<EventTarget>> WrappedHtml<H>{
 	pub fn add_listener<T, F>(&self, event_name: &'static str, callback: F) -> Result<(), JsValue>
 		where
 			// this _technically_ doesn't have to be static, but we need to keep track of the ref to the closure.
@@ -58,16 +70,14 @@ impl WrappedHtml {
 
 		return Ok(());
 	}
+}
 
-	pub fn as_elm<T: JsCast>(&self) -> Option<&'_ T> {
-		self.raw.dyn_ref()
-	}
-
-	pub fn own(elm: Element) -> Self {
+impl<H> WrappedHtml<H> {
+	pub fn own(elm: H) -> Self {
 		Self{raw: elm}
 	}
 
-	pub fn into_inner(self) -> Element {
+	pub fn into_inner(self) -> H {
 		self.raw
 	}
 }

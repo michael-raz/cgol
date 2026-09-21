@@ -290,7 +290,7 @@ fn init_canvas(canvas: Arc<WrappedHtml>, viewer: Arc<Mutex<Viewer>>) {
 		}
 	};
 	onresize(Event::new("resize").unwrap());
-	canvas.add_listener("resize", onresize).unwrap();
+	WrappedHtml::own(window().unwrap()).add_listener("resize", onresize).unwrap();
 }
 
 
