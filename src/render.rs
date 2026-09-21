@@ -75,7 +75,10 @@ struct Viewer {
 	camera_pos: (f64, f64),
 	scale: f64,
 
+	// NOTE: these are in viewer because
+	//       panning and zooming both need to modify them
 	cursor_pin: Option<(f64, f64)>,
+	rsel: Option<((f64, f64), (f64, f64))>,
 }
 impl Viewer {
 	fn new(grid: Grid, ctx: CanvasRenderingContext2d) -> Self {
@@ -87,13 +90,21 @@ impl Viewer {
 			camera_pos: (0.0, 0.0),
 			scale: 1.0,
 			cursor_pin: None,
+			rsel: None,
 		}
 	}
 
 	fn from_screen_space(&self, xy: (f64, f64)) -> (f64, f64) {
 		(
-			(xy.0 + self.camera_pos.0) / self.scale,
-			(xy.1 + self.camera_pos.1) / self.scale,
+			(xy.0 + self.camera_pos.0) / self.scale / CELL_SIZE,
+			(xy.1 + self.camera_pos.1) / self.scale / CELL_SIZE,
+		)
+	}
+
+	fn to_screen_space(&self, xy: (f64, f64)) -> (f64, f64) {
+		(
+			xy.0 * self.scale * CELL_SIZE - self.camera_pos.0,
+			xy.1 * self.scale * CELL_SIZE - self.camera_pos.1,
 		)
 	}
 
@@ -102,13 +113,47 @@ impl Viewer {
 
 		const DEAD_COLOR:  &str = "#0f0f0f";
 		const ALIVE_COLOR: &str = "#f0f0f0";
+		const RSEL_COLOR:  &str = "#ff0000";
+		let size = CELL_SIZE * self.scale;
 
 		self.ctx.set_fill_style_str(DEAD_COLOR);
 		self.ctx.fill_rect(0.0, 0.0, width as f64, height as f64);
-		// ctx.clear_rect(0.0, 0.0, width as f64, height as f64);
 
-		let size = CELL_SIZE * self.scale;
+		// draw rectangle selection
+		if let Some((start, end)) = self.rsel {
+			let (start, end) = (
+				(
+					start.0.min(end.0),
+					start.1.min(end.1),
+				),
+				(
+					start.0.max(end.0),
+					start.1.max(end.1),
+				),
+			);
 
+			let start = (
+				start.0.floor(),
+				start.1.floor(),
+			);
+			let end = (
+				end.0.ceil(),
+				end.1.ceil(),
+			);
+
+			let start = self.to_screen_space(start);
+			let end = self.to_screen_space(end);
+
+			self.ctx.set_stroke_style_str(RSEL_COLOR);
+			self.ctx.stroke_rect(
+				start.0,
+				start.1,
+				end.0 - start.0,
+				end.1 - start.1,
+			);
+		}
+
+		// draw cells
 		self.ctx.set_fill_style_str(ALIVE_COLOR);
 		for pos in self.grid.get_alive() {
 			self.ctx.fill_rect(
@@ -218,28 +263,44 @@ fn init_canvas(canvas: Arc<WrappedHtml>, viewer: Arc<Mutex<Viewer>>) {
 			);
 
 			let lmb = (e.buttons() & 1) > 0;
+			let rmb = (e.buttons() & 2) > 0;
 			let shift = e.shift_key();
 
-			if viewer.cursor_pin.is_none() && lmb && !shift {
+			// camera pannning
+			let pan = rmb && !shift;
+			if viewer.cursor_pin.is_none() && pan {
 				let mut tmp = mpos;
 				tmp.0 += viewer.camera_pos.0;
 				tmp.1 += viewer.camera_pos.1;
 
 				viewer.cursor_pin = Some(tmp);
-			} else if !lmb {
+			} else if !pan {
 				viewer.cursor_pin = None;
 			}
 
 			if let Some(pinpoint) = viewer.cursor_pin {
 				viewer.camera_pos.0 = pinpoint.0 - mpos.0;
 				viewer.camera_pos.1 = pinpoint.1 - mpos.1;
-
-				viewer.draw();
 			}
+
+
+			// rectangle selection
+			let pos = viewer.from_screen_space(mpos);
+			let rsel = lmb && shift;
+			if viewer.rsel.is_none() && rsel {
+				viewer.rsel = Some((pos, pos));
+			} else if !rsel {
+				viewer.rsel = None;
+			} else if let Some(rsel) = viewer.rsel.as_mut() {
+				rsel.1 = pos;
+			}
+
+			viewer.draw();
 		}
 	}).unwrap();
 
 
+	// toggle cells
 	canvas.add_listener("mousedown", {
 		let viewer = viewer.clone();
 		move |e: MouseEvent|{
@@ -253,11 +314,11 @@ fn init_canvas(canvas: Arc<WrappedHtml>, viewer: Arc<Mutex<Viewer>>) {
 			let lmb = (e.buttons() & 1) > 0;
 			let shift = e.shift_key();
 
-			if lmb && shift {
+			if lmb && !shift {
 				let pos = viewer.from_screen_space(pos);
 				let pos = (
-					(pos.0 / CELL_SIZE).floor() as i64,
-					(pos.1 / CELL_SIZE).floor() as i64,
+					pos.0.floor() as i64,
+					pos.1.floor() as i64,
 				).into();
 
 				let alive = viewer.grid.get_cell(&pos);
@@ -266,6 +327,11 @@ fn init_canvas(canvas: Arc<WrappedHtml>, viewer: Arc<Mutex<Viewer>>) {
 				viewer.draw();
 			}
 		}
+	}).unwrap();
+
+
+	canvas.add_listener("contextmenu", |e: Event| {
+		e.prevent_default();
 	}).unwrap();
 
 
