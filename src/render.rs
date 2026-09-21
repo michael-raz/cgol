@@ -79,6 +79,8 @@ struct Viewer {
 	//       panning and zooming both need to modify them
 	cursor_pin: Option<(f64, f64)>,
 	rsel: Option<((f64, f64), (f64, f64))>,
+
+	stopped_sel: bool,
 }
 impl Viewer {
 	fn new(grid: Grid, ctx: CanvasRenderingContext2d) -> Self {
@@ -91,6 +93,7 @@ impl Viewer {
 			scale: 1.0,
 			cursor_pin: None,
 			rsel: None,
+			stopped_sel: true,
 		}
 	}
 
@@ -265,6 +268,8 @@ pub fn run() {
 
 
 fn init_canvas(canvas: Arc<WrappedHtml>, viewer: Arc<Mutex<Viewer>>) {
+	let window = WrappedHtml::own(window().unwrap());
+
 	// TODO: _also_ use "mousewheel" event to support Safari
 	//       https://developer.mozilla.org/en-US/docs/Web/API/Element/mousewheel_event
 	canvas.add_listener("wheel", {
@@ -331,21 +336,15 @@ fn init_canvas(canvas: Arc<WrappedHtml>, viewer: Arc<Mutex<Viewer>>) {
 				// rectangle selection
 				let pos = viewer.from_screen_space(mpos);
 				let rsel = lmb && shift;
-				if viewer.rsel.is_none() && rsel {
+				if (viewer.stopped_sel || viewer.rsel.is_none()) && rsel {
 					viewer.rsel = Some((pos, pos));
-				} else if !rsel && let Some(sel) = viewer.get_selection() {
-					let x_bound = sel.0.0..sel.1.0;
-					let y_bound = sel.0.1..sel.1.0;
-
-					let sel = viewer.grid.get_alive()
-						.filter(|pos| x_bound.contains(&pos.x) && y_bound.contains(&pos.y))
-						.map(|pos| (pos.x - x_bound.start, pos.y - y_bound.start).into());
-					let grid = Grid::from_iter(sel);
-
-					viewer.rsel = None;
-
-					to_clipboard(&grid).await;
-				} else if let Some(rsel) = viewer.rsel.as_mut() {
+					viewer.stopped_sel = false;
+				} else if !rsel {
+					if lmb {
+						viewer.rsel = None;
+					}
+					viewer.stopped_sel = true;
+				} else if rsel && let Some(rsel) = viewer.rsel.as_mut() {
 					rsel.1 = pos;
 				}
 
@@ -387,6 +386,48 @@ fn init_canvas(canvas: Arc<WrappedHtml>, viewer: Arc<Mutex<Viewer>>) {
 	}).unwrap();
 
 
+	window.add_listener("keydown", {
+		let viewer = viewer.clone();
+		move |e: Event| {
+			let viewer = viewer.clone();
+			let _ = futures::future_to_promise(async move {
+				let mut viewer = viewer.lock().unwrap();
+				let mut draw_flag = false;
+
+				let key: String = proto_get(e.as_ref(), "key").unwrap().as_string().unwrap();
+				let ctrl: bool = proto_get(e.as_ref(), "ctrlKey").unwrap().dyn_into::<Boolean>().unwrap().into();
+
+				// copy selection
+				if key == "c" && ctrl && let Some(sel) = viewer.get_selection() {
+					let x_bound = sel.0.0..sel.1.0;
+					let y_bound = sel.0.1..sel.1.0;
+
+					let sel = viewer.grid.get_alive()
+						.filter(|pos| x_bound.contains(&pos.x) && y_bound.contains(&pos.y))
+						.map(|pos| (pos.x - x_bound.start, pos.y - y_bound.start).into());
+					let grid = Grid::from_iter(sel);
+
+					to_clipboard(&grid).await;
+					draw_flag = true;
+				}
+
+				// paste
+				if key == "v" && ctrl {
+					viewer.grid = from_clipboard().await;
+					viewer.rsel = None;
+					draw_flag = true;
+				}
+
+				if draw_flag {
+					viewer.draw();
+				}
+
+				return Ok(JsValue::NULL);
+			});
+		}
+	}).unwrap();
+
+
 	canvas.add_listener("contextmenu", |e: Event| {
 		e.prevent_default();
 	}).unwrap();
@@ -413,7 +454,7 @@ fn init_canvas(canvas: Arc<WrappedHtml>, viewer: Arc<Mutex<Viewer>>) {
 		}
 	};
 	onresize(Event::new("resize").unwrap());
-	WrappedHtml::own(window().unwrap()).add_listener("resize", onresize).unwrap();
+	window.add_listener("resize", onresize).unwrap();
 }
 
 

@@ -10,7 +10,7 @@ It's intended to be a web app that can also run natively on Linux (maybe Windows
 - [ ] QOL for the editor
 	- [ ] Undo and redo
 	- [x] Rectangle selection
-	- [ ] Copy-paste
+	- [x] Copy-paste
 	- [ ] Blueprints
 - [ ] Coloring
 - [x] Adjustable play rate with pause/unpause
