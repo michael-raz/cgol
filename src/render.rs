@@ -101,11 +101,24 @@ impl Viewer {
 		)
 	}
 
-	fn to_screen_space(&self, xy: (f64, f64)) -> (f64, f64) {
+	fn to_screen_space(&self, xy: (i64, i64)) -> (f64, f64) {
 		(
-			xy.0 * self.scale * CELL_SIZE - self.camera_pos.0,
-			xy.1 * self.scale * CELL_SIZE - self.camera_pos.1,
+			xy.0 as f64 * self.scale * CELL_SIZE - self.camera_pos.0,
+			xy.1 as f64 * self.scale * CELL_SIZE - self.camera_pos.1,
 		)
+	}
+
+	fn get_selection(&self) -> Option<((i64, i64), (i64, i64))> {
+		self.rsel.map(|(start, end)| (
+			(
+				start.0.min(end.0).floor() as i64,
+				start.1.min(end.1).floor() as i64,
+			),
+			(
+				start.0.max(end.0).ceil() as i64,
+				start.1.max(end.1).ceil() as i64,
+			),
+		))
 	}
 
 	fn draw(&self) {
@@ -120,27 +133,7 @@ impl Viewer {
 		self.ctx.fill_rect(0.0, 0.0, width as f64, height as f64);
 
 		// draw rectangle selection
-		if let Some((start, end)) = self.rsel {
-			let (start, end) = (
-				(
-					start.0.min(end.0),
-					start.1.min(end.1),
-				),
-				(
-					start.0.max(end.0),
-					start.1.max(end.1),
-				),
-			);
-
-			let start = (
-				start.0.floor(),
-				start.1.floor(),
-			);
-			let end = (
-				end.0.ceil(),
-				end.1.ceil(),
-			);
-
+		if let Some((start, end)) = self.get_selection() {
 			let start = self.to_screen_space(start);
 			let end = self.to_screen_space(end);
 
@@ -164,6 +157,55 @@ impl Viewer {
 		}
 	}
 }
+
+
+async fn to_clipboard(grid: &Grid) {
+	let mut raw = vec![];
+	grid.save(&mut raw).unwrap();
+
+	use flate2::{Compression, read::ZlibEncoder};
+	use std::io::Read;
+
+	let mut bytes = vec![];
+	ZlibEncoder::new(&mut raw.as_slice(), Compression::best())
+		.read_to_end(&mut bytes).unwrap();
+
+	use base64::prelude::*;
+
+	let out = BASE64_STANDARD.encode(bytes);
+
+	let w = window().unwrap();
+	let nav = proto_get(&w, "navigator").unwrap();
+	let clip = proto_get(nav.dyn_ref().unwrap(), "clipboard").unwrap();
+	let write = proto_get(clip.dyn_ref().unwrap(), "writeText").unwrap();
+	let write = write.dyn_into::<Function>().unwrap();
+	let write: Promise = write.call(&clip, (&out.into(),)).unwrap().dyn_into().unwrap();
+
+	write.await.unwrap();
+}
+async fn from_clipboard() -> Grid {
+	let w = window().unwrap();
+	let nav = proto_get(&w, "navigator").unwrap();
+	let clip = proto_get(nav.dyn_ref().unwrap(), "clipboard").unwrap();
+	let read = proto_get(clip.dyn_ref().unwrap(), "readText").unwrap();
+	let read = read.dyn_into::<Function>().unwrap();
+	let text: Promise = read.call(&clip, ()).unwrap().dyn_into().unwrap();
+
+	let text = text.await.unwrap();
+
+	use base64::prelude::*;
+	use flate2::read::ZlibDecoder;
+	use std::io::Read;
+
+	let text = text.as_string().unwrap();
+	let bytes = BASE64_STANDARD.decode(text).unwrap();
+	let mut data = vec![];
+	ZlibDecoder::new(&mut bytes.as_slice())
+		.read_to_end(&mut data).unwrap();
+
+	Grid::load(&mut data.as_slice()).unwrap()
+}
+
 
 
 
@@ -254,48 +296,63 @@ fn init_canvas(canvas: Arc<WrappedHtml>, viewer: Arc<Mutex<Viewer>>) {
 
 	canvas.add_listener("mousemove", {
 		let viewer = viewer.clone();
-		move |e: MouseEvent|{
-			let viewer: &mut Viewer = &mut viewer.lock().unwrap();
+		move |e: MouseEvent| {
+			let viewer = viewer.clone();
+			let _ = futures::future_to_promise(async move {
+				let viewer: &mut Viewer = &mut viewer.lock().unwrap();
 
-			let mpos = (
-				e.x() as f64,
-				e.y() as f64,
-			);
+				let mpos = (
+					e.x() as f64,
+					e.y() as f64,
+				);
 
-			let lmb = (e.buttons() & 1) > 0;
-			let rmb = (e.buttons() & 2) > 0;
-			let shift = e.shift_key();
+				let lmb = (e.buttons() & 1) > 0;
+				let rmb = (e.buttons() & 2) > 0;
+				let shift = e.shift_key();
 
-			// camera pannning
-			let pan = rmb && !shift;
-			if viewer.cursor_pin.is_none() && pan {
-				let mut tmp = mpos;
-				tmp.0 += viewer.camera_pos.0;
-				tmp.1 += viewer.camera_pos.1;
+				// camera pannning
+				let pan = rmb && !shift;
+				if viewer.cursor_pin.is_none() && pan {
+					let mut tmp = mpos;
+					tmp.0 += viewer.camera_pos.0;
+					tmp.1 += viewer.camera_pos.1;
 
-				viewer.cursor_pin = Some(tmp);
-			} else if !pan {
-				viewer.cursor_pin = None;
-			}
+					viewer.cursor_pin = Some(tmp);
+				} else if !pan {
+					viewer.cursor_pin = None;
+				}
 
-			if let Some(pinpoint) = viewer.cursor_pin {
-				viewer.camera_pos.0 = pinpoint.0 - mpos.0;
-				viewer.camera_pos.1 = pinpoint.1 - mpos.1;
-			}
+				if let Some(pinpoint) = viewer.cursor_pin {
+					viewer.camera_pos.0 = pinpoint.0 - mpos.0;
+					viewer.camera_pos.1 = pinpoint.1 - mpos.1;
+				}
 
 
-			// rectangle selection
-			let pos = viewer.from_screen_space(mpos);
-			let rsel = lmb && shift;
-			if viewer.rsel.is_none() && rsel {
-				viewer.rsel = Some((pos, pos));
-			} else if !rsel {
-				viewer.rsel = None;
-			} else if let Some(rsel) = viewer.rsel.as_mut() {
-				rsel.1 = pos;
-			}
+				// rectangle selection
+				let pos = viewer.from_screen_space(mpos);
+				let rsel = lmb && shift;
+				if viewer.rsel.is_none() && rsel {
+					viewer.rsel = Some((pos, pos));
+				} else if !rsel && let Some(sel) = viewer.get_selection() {
+					let x_bound = sel.0.0..sel.1.0;
+					let y_bound = sel.0.1..sel.1.0;
 
-			viewer.draw();
+					let sel = viewer.grid.get_alive()
+						.filter(|pos| x_bound.contains(&pos.x) && y_bound.contains(&pos.y))
+						.map(|pos| (pos.x - x_bound.start, pos.y - y_bound.start).into());
+					let grid = Grid::from_iter(sel);
+
+					viewer.rsel = None;
+
+					to_clipboard(&grid).await;
+				} else if let Some(rsel) = viewer.rsel.as_mut() {
+					rsel.1 = pos;
+				}
+
+				viewer.draw();
+
+				return Ok(JsValue::NULL);
+			});
 		}
 	}).unwrap();
 
@@ -366,33 +423,17 @@ fn create_load_button(viewer: Arc<Mutex<Viewer>>) -> WrappedHtml {
 	button.as_elm::<Node>().unwrap().set_text_content(Some("Load"));
 
 	button.add_listener("click", {
-		let viewer = viewer.clone();
 		move |_: MouseEvent| {
-			let w = window().unwrap();
-			let nav = proto_get(&w, "navigator").unwrap();
-			let clip = proto_get(nav.dyn_ref().unwrap(), "clipboard").unwrap();
-			let read = proto_get(clip.dyn_ref().unwrap(), "readText").unwrap();
-			let read = read.dyn_into::<Function>().unwrap();
-			let text: Promise = read.call(&clip, ()).unwrap().dyn_into().unwrap();
-
 			let viewer = viewer.clone();
-
-			let c = wrap(move |text: JsValue| {
-				use base64::prelude::*;
-				use flate2::read::ZlibDecoder;
-				use std::io::Read;
-
-				let text = text.as_string().unwrap();
-				let bytes = BASE64_STANDARD.decode(text).unwrap();
-				let mut data = vec![];
-				ZlibDecoder::new(&mut bytes.as_slice())
-					.read_to_end(&mut data).unwrap();
+			let _ = futures::future_to_promise(async move {
+				let grid = from_clipboard().await;
 
 				let mut viewer = viewer.lock().unwrap();
-				viewer.grid = Grid::load(&mut data.as_slice()).unwrap();
+				viewer.grid = grid;
+				viewer.draw();
+
+				return Ok(JsValue::NULL);
 			});
-			let _ = text.then(&c);
-			c.forget();
 		}
 	}).unwrap();
 
@@ -406,28 +447,21 @@ fn create_save_button(viewer: Arc<Mutex<Viewer>>) -> WrappedHtml {
 	button.add_listener("click", {
 		let viewer = viewer.clone();
 		move |_: MouseEvent| {
-			let viewer = viewer.lock().unwrap();
-			let mut raw = vec![];
-			viewer.grid.save(&mut raw).unwrap();
+			let viewer = viewer.clone();
+			let _ = futures::future_to_promise(async move {
+				// NOTE: we clone grid here so that we don't hold onto the lock for
+				//       viewer whilst awaiting a promise
+				//       as doing so could cause a dead-lock
+				let viewer = viewer.lock().unwrap();
+				let grid = viewer.grid.clone();
+				drop(viewer);
 
-			use flate2::{Compression, read::ZlibEncoder};
-			use std::io::Read;
+				to_clipboard(&grid).await;
 
-			let mut bytes = vec![];
-			ZlibEncoder::new(&mut raw.as_slice(), Compression::best())
-				.read_to_end(&mut bytes).unwrap();
-
-			use base64::prelude::*;
-
-			let out = BASE64_STANDARD.encode(bytes);
-
-			let w = window().unwrap();
-			let nav = proto_get(&w, "navigator").unwrap();
-			let clip = proto_get(nav.dyn_ref().unwrap(), "clipboard").unwrap();
-			let write = proto_get(clip.dyn_ref().unwrap(), "writeText").unwrap();
-			let write = write.dyn_into::<Function>().unwrap();
-			write.call(&clip, (&out.into(),)).unwrap();
+				return Ok(JsValue::NULL);
+			});
 		}
+
 	}).unwrap();
 
 	button

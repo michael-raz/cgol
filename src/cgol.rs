@@ -191,6 +191,19 @@ impl Grid {
 	}
 }
 
+impl IntoIterator for Grid {
+	type Item = Pos;
+	type IntoIter = <HashSet<Self::Item> as IntoIterator>::IntoIter;
+	fn into_iter(self) -> Self::IntoIter {
+		self.cells.into_iter()
+	}
+}
+impl FromIterator<Pos> for Grid {
+	fn from_iter<T: IntoIterator<Item=Pos>>(iter: T) -> Self {
+		Self{cells: HashSet::from_iter(iter)}
+	}
+}
+
 
 
 #[cfg(test)]
