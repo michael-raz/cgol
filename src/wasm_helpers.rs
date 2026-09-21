@@ -1,7 +1,7 @@
-use wasm_bindgen::prelude::*;
-use wasm_bindgen::convert::*;
-use web_sys::*;
-use js_sys::*;
+pub use wasm_bindgen::prelude::*;
+pub use wasm_bindgen::convert::*;
+pub use web_sys::*;
+pub use js_sys::*;
 
 use std::borrow::Cow;
 
@@ -20,20 +20,10 @@ pub(crate) use println;
 
 
 
-pub fn wrap<'a, T: FromWasmAbi, F: FnMut(T) + 'static>(callback: F) -> ScopedClosure<'a, dyn FnMut(T)> {
+pub fn wrap<T: FromWasmAbi, F: FnMut(T) + 'static>(callback: F) -> ScopedClosure<'static, dyn FnMut(T)> {
 	Closure::wrap(Box::new(callback) as Box<dyn FnMut(_)>)
 }
 
-pub fn add_event<T, E, F>(name: &'static str, target: &T, callback: F)
-	where
-		T: AsRef<EventTarget>,
-		E: FromWasmAbi,
-		F: FnMut(E) + 'static,
-{
-	let c = wrap(callback);
-	target.as_ref().add_event_listener_with_callback(name, &c.as_ref().unchecked_ref()).unwrap();
-	c.forget();
-}
 
 pub fn set_interval<E, F>(target: &Window, callback: F, rate: i32)
 	where

@@ -3,6 +3,7 @@ pub use cgol::*;
 
 mod render;
 mod wasm_helpers;
+mod dom;
 
 
 

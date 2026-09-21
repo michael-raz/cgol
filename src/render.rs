@@ -1,14 +1,10 @@
-use wasm_bindgen::prelude::*;
-use wasm_bindgen::convert::*;
-use web_sys::*;
-use js_sys::*;
-
 use std::sync::{Arc, Mutex};
 use std::str::FromStr;
 
 use crate::cgol::*;
 use crate::wasm_helpers::*;
 use crate::wasm_helpers::println;
+use crate::dom::*;
 
 
 
@@ -124,38 +120,30 @@ impl Viewer {
 	}
 }
 
-macro_rules! set_styles {
-	($elm:expr, { $($name:literal: $value:expr);* $(;)? }) => {{
-		let style = proto_get($elm, "style").and_then(|js| js.dyn_into::<Object>().ok()).unwrap();
-		$( proto_set(&style, $name, &$value.into()).unwrap(); )*
-	}};
-}
+
 
 pub fn run() {
 	let w = window().unwrap();
 	let document = w.document().unwrap();
-	let body = document.body().unwrap();
+	let body = WrappedHtml::own(document.body().unwrap().into());
 
-	let div = document.create_element("div").unwrap();
-	set_styles!(&div, {
+	let div = WrappedHtml::new("div").unwrap();
+	set_style!((&div){
 		"display": "flex";
 		"flex-direction": "column";
 		"width": "100%";
 		"height": "100%";
 	});
+	body.append_child(&div).unwrap();
 
-	let canvas = Arc::new(document.create_element("canvas").unwrap()
-		.dyn_into::<HtmlCanvasElement>().unwrap());
-	div.append_child(&canvas).unwrap();
-
-	set_styles!(&canvas, {
+	let canvas = WrappedHtml::new("canvas").unwrap();
+	set_style!((&canvas){
 		"width": "100%";
 		"height": "100%";
 	});
+	div.append_child(&canvas).unwrap();
 
-	body.append_child(&div).unwrap();
-
-	let ctx = canvas.get_context("2d").unwrap().unwrap()
+	let ctx = canvas.as_elm::<HtmlCanvasElement>().unwrap().get_context("2d").unwrap().unwrap()
 		.dyn_into::<CanvasRenderingContext2d>().unwrap();
 
 	// acorn
@@ -169,29 +157,57 @@ pub fn run() {
 	let viewer = Arc::new(Mutex::new(viewer));
 	viewer.lock().unwrap().draw();
 
-	let onresize = {
+	let canvas = Arc::new(canvas);
+	init_canvas(canvas, viewer.clone());
+
+	let di = DynamicInterval::new(w, {
 		let viewer = viewer.clone();
-		let canvas = canvas.clone();
-		move |_: Event|{
+		move || {
 			let viewer: &mut Viewer = &mut viewer.lock().unwrap();
-
-			let width = canvas.client_width() as u32;
-			let height = canvas.client_height() as u32;
-			if viewer.viewport_dim.0 == width && viewer.viewport_dim.1 == height {
-				return;
+			if !viewer.paused {
+				viewer.grid.step(1);
+				viewer.draw();
 			}
+		}
+	}, None);
+	DynamicInterval::set_rate(di.clone(), from_slider(DEFAULT_SLIDE));
 
-			viewer.viewport_dim = (width, height);
-			canvas.set_width(width);
-			canvas.set_height(height);
+	div.append_child(&create_controls(viewer, di)).unwrap();
+}
+
+
+
+fn init_canvas(canvas: Arc<WrappedHtml>, viewer: Arc<Mutex<Viewer>>) {
+	// TODO: _also_ use "mousewheel" event to support Safari
+	//       https://developer.mozilla.org/en-US/docs/Web/API/Element/mousewheel_event
+	canvas.add_listener("wheel", {
+		let viewer = viewer.clone();
+		move |e: WheelEvent|{
+			let viewer = &mut viewer.lock().unwrap();
+
+			let mpos = (e.offset_x() as f64, e.offset_y() as f64);
+
+			let prev = viewer.scale;
+			let delta = viewer.scale * -0.1 * (e.delta_y()).signum();
+			viewer.scale += delta;
+
+			let before = viewer.camera_pos;
+			viewer.camera_pos.0 = (viewer.scale / prev) * (mpos.0 + viewer.camera_pos.0) - mpos.0;
+			viewer.camera_pos.1 = (viewer.scale / prev) * (mpos.1 + viewer.camera_pos.1) - mpos.1;
+
+			if let Some(mut tmp) = viewer.cursor_pin {
+				tmp.0 -= before.0 - viewer.camera_pos.0;
+				tmp.1 -= before.1 - viewer.camera_pos.1;
+
+				viewer.cursor_pin = Some(tmp);
+			}
 
 			viewer.draw();
 		}
-	};
-	onresize(Event::new("resize").unwrap());
-	add_event("resize", &w, onresize);
+	}).unwrap();
 
-	add_event("mousemove", canvas.as_ref(), {
+
+	canvas.add_listener("mousemove", {
 		let viewer = viewer.clone();
 		move |e: MouseEvent|{
 			let viewer: &mut Viewer = &mut viewer.lock().unwrap();
@@ -221,9 +237,10 @@ pub fn run() {
 				viewer.draw();
 			}
 		}
-	});
+	}).unwrap();
 
-	add_event("mousedown", canvas.as_ref(), {
+
+	canvas.add_listener("mousedown", {
 		let viewer = viewer.clone();
 		move |e: MouseEvent|{
 			let viewer: &mut Viewer = &mut viewer.lock().unwrap();
@@ -249,62 +266,134 @@ pub fn run() {
 				viewer.draw();
 			}
 		}
-	});
+	}).unwrap();
 
-	// TODO: _also_ use "mousewheel" event to support Safari
-	//       https://developer.mozilla.org/en-US/docs/Web/API/Element/mousewheel_event
-	add_event("wheel", canvas.as_ref(), {
+
+	let onresize = {
 		let viewer = viewer.clone();
-		move |e: WheelEvent|{
-			let viewer = &mut viewer.lock().unwrap();
+		let canvas = canvas.clone();
+		move |_: Event|{
+			let canvas = canvas.as_elm::<HtmlCanvasElement>().unwrap();
+			let viewer: &mut Viewer = &mut viewer.lock().unwrap();
 
-			let mpos = (e.offset_x() as f64, e.offset_y() as f64);
-
-			let prev = viewer.scale;
-			let delta = viewer.scale * -0.1 * (e.delta_y()).signum();
-			viewer.scale += delta;
-
-			let before = viewer.camera_pos;
-			viewer.camera_pos.0 = (viewer.scale / prev) * (mpos.0 + viewer.camera_pos.0) - mpos.0;
-			viewer.camera_pos.1 = (viewer.scale / prev) * (mpos.1 + viewer.camera_pos.1) - mpos.1;
-
-			if let Some(mut tmp) = viewer.cursor_pin {
-				tmp.0 -= before.0 - viewer.camera_pos.0;
-				tmp.1 -= before.1 - viewer.camera_pos.1;
-
-				viewer.cursor_pin = Some(tmp);
+			let width = canvas.client_width() as u32;
+			let height = canvas.client_height() as u32;
+			if viewer.viewport_dim.0 == width && viewer.viewport_dim.1 == height {
+				return;
 			}
+
+			viewer.viewport_dim = (width, height);
+			canvas.set_width(width);
+			canvas.set_height(height);
 
 			viewer.draw();
 		}
-	});
+	};
+	onresize(Event::new("resize").unwrap());
+	canvas.add_listener("resize", onresize).unwrap();
+}
 
-	fn from_slider(src: i32) -> Option<i32> {
-		(src != 0).then(|| 50_000 / src / src)
-	}
 
-	const DEFAULT_SLIDE: i32 = 10;
 
-	let di = DynamicInterval::new(w, {
+fn create_load_button(viewer: Arc<Mutex<Viewer>>) -> WrappedHtml {
+	let button = WrappedHtml::new("button").unwrap();
+	button.as_elm::<Node>().unwrap().set_text_content(Some("Load"));
+
+	button.add_listener("click", {
 		let viewer = viewer.clone();
-		move || {
-			let viewer: &mut Viewer = &mut viewer.lock().unwrap();
-			if !viewer.paused {
-				viewer.grid.step(1);
-				viewer.draw();
-			}
+		move |_: MouseEvent| {
+			let w = window().unwrap();
+			let nav = proto_get(&w, "navigator").unwrap();
+			let clip = proto_get(nav.dyn_ref().unwrap(), "clipboard").unwrap();
+			let read = proto_get(clip.dyn_ref().unwrap(), "readText").unwrap();
+			let read = read.dyn_into::<Function>().unwrap();
+			let text: Promise = read.call(&clip, ()).unwrap().dyn_into().unwrap();
+
+			let viewer = viewer.clone();
+
+			let c = wrap(move |text: JsValue| {
+				use base64::prelude::*;
+				use flate2::read::ZlibDecoder;
+				use std::io::Read;
+
+				let text = text.as_string().unwrap();
+				let bytes = BASE64_STANDARD.decode(text).unwrap();
+				let mut data = vec![];
+				ZlibDecoder::new(&mut bytes.as_slice())
+					.read_to_end(&mut data).unwrap();
+
+				let mut viewer = viewer.lock().unwrap();
+				viewer.grid = Grid::load(&mut data.as_slice()).unwrap();
+			});
+			let _ = text.then(&c);
+			c.forget();
 		}
-	}, None);
-	DynamicInterval::set_rate(di.clone(), from_slider(DEFAULT_SLIDE));
+	}).unwrap();
 
-	let controls = document.create_element("div").unwrap();
+	button
+}
 
-	let label = Arc::new(document.create_element("span").unwrap());
+fn create_save_button(viewer: Arc<Mutex<Viewer>>) -> WrappedHtml {
+	let button = WrappedHtml::new("button").unwrap();
+	button.as_elm::<Node>().unwrap().set_text_content(Some("Save"));
 
-	let slider = document.create_element("input").unwrap();
-	proto_set(&slider, "type", &"range".into()).unwrap();
-	proto_set(&slider, "value", &DEFAULT_SLIDE.into()).unwrap();
-	add_event("input", &slider, {
+	button.add_listener("click", {
+		let viewer = viewer.clone();
+		move |_: MouseEvent| {
+			let viewer = viewer.lock().unwrap();
+			let mut raw = vec![];
+			viewer.grid.save(&mut raw).unwrap();
+
+			use flate2::{Compression, read::ZlibEncoder};
+			use std::io::Read;
+
+			let mut bytes = vec![];
+			ZlibEncoder::new(&mut raw.as_slice(), Compression::best())
+				.read_to_end(&mut bytes).unwrap();
+
+			use base64::prelude::*;
+
+			let out = BASE64_STANDARD.encode(bytes);
+
+			let w = window().unwrap();
+			let nav = proto_get(&w, "navigator").unwrap();
+			let clip = proto_get(nav.dyn_ref().unwrap(), "clipboard").unwrap();
+			let write = proto_get(clip.dyn_ref().unwrap(), "writeText").unwrap();
+			let write = write.dyn_into::<Function>().unwrap();
+			write.call(&clip, (&out.into(),)).unwrap();
+		}
+	}).unwrap();
+
+	button
+}
+
+fn create_play_button(viewer: Arc<Mutex<Viewer>>) -> WrappedHtml {
+	let button = WrappedHtml::new("button").unwrap();
+	button.as_elm::<Node>().unwrap().set_text_content(Some("Play"));
+
+	button.add_listener("click", {
+		let viewer = viewer.clone();
+		move |e: MouseEvent| {
+			let mut viewer = viewer.lock().unwrap();
+			viewer.paused = !viewer.paused;
+
+			let node: Node = e.target().unwrap().dyn_into().unwrap();
+			node.set_text_content(Some(if viewer.paused { "Play" } else { "Pause" }));
+		}
+	}).unwrap();
+
+	button
+}
+
+const DEFAULT_SLIDE: i32 = 10;
+fn from_slider(src: i32) -> Option<i32> {
+	(src != 0).then(|| 50_000 / src / src)
+}
+fn create_slider<F: 'static + Fn()>(di: Arc<Mutex<DynamicInterval<F>>>, label: Arc<WrappedHtml>) -> WrappedHtml {
+	let slider = WrappedHtml::new("input").unwrap();
+	slider.set("type", &"range".into()).unwrap();
+	slider.set("value", &DEFAULT_SLIDE.into()).unwrap();
+	slider.add_listener("input", {
 		let di = di.clone();
 		let label = label.clone();
 		move |e: Event| {
@@ -314,7 +403,7 @@ pub fn run() {
 			let value = i32::from_str(&value.as_string().unwrap()).unwrap();
 			let value = from_slider(value);
 
-			label.set_text_content(Some(&(if let Some(value) = value {
+			label.as_elm::<Node>().unwrap().set_text_content(Some(&(if let Some(value) = value {
 				format!("{:>5.2}", 1000.0 / value as f64)
 			} else {
 				"N/A".to_string()
@@ -322,103 +411,29 @@ pub fn run() {
 
 			DynamicInterval::set_rate(di.clone(), value);
 		}
-	});
+	}).unwrap();
 
-	let play_toggle = {
-		let button = document.create_element("button").unwrap();
-		button.set_text_content(Some("Play"));
+	slider
+}
 
-		add_event("click", &button, {
-			let viewer = viewer.clone();
-			move |e: MouseEvent| {
-				let mut viewer = viewer.lock().unwrap();
-				viewer.paused = !viewer.paused;
+fn create_label() -> WrappedHtml {
+	WrappedHtml::new("span").unwrap()
+}
 
-				let node: Node = e.target().unwrap().dyn_into().unwrap();
-				node.set_text_content(Some(if viewer.paused { "Play" } else { "Pause" }));
-			}
-		});
+fn create_controls<F>(viewer: Arc<Mutex<Viewer>>, di: Arc<Mutex<DynamicInterval<F>>>) -> WrappedHtml
+	where F: 'static + Fn()
+{
+	let controls = WrappedHtml::new("div").unwrap();
 
-		button
-	};
+	let label = create_label();
+	let label = Arc::new(label);
 
-	let save = {
-		let button = document.create_element("button").unwrap();
-		button.set_text_content(Some("Save"));
-
-		add_event("click", &button, {
-			let viewer = viewer.clone();
-			move |e: MouseEvent| {
-				let viewer = viewer.lock().unwrap();
-				let mut raw = vec![];
-				viewer.grid.save(&mut raw).unwrap();
-
-				use flate2::{Compression, read::ZlibEncoder};
-				use std::io::Read;
-
-				let mut bytes = vec![];
-				ZlibEncoder::new(&mut raw.as_slice(), Compression::best())
-					.read_to_end(&mut bytes).unwrap();
-
-				use base64::prelude::*;
-
-				let out = BASE64_STANDARD.encode(bytes);
-
-				let w = window().unwrap();
-				let nav = proto_get(&w, "navigator").unwrap();
-				let clip = proto_get(nav.dyn_ref().unwrap(), "clipboard").unwrap();
-				let write = proto_get(clip.dyn_ref().unwrap(), "writeText").unwrap();
-				let write = write.dyn_into::<Function>().unwrap();
-				write.call(&clip, (&out.into(),)).unwrap();
-			}
-		});
-
-		button
-	};
-
-	let load = {
-		let button = document.create_element("button").unwrap();
-		button.set_text_content(Some("Load"));
-
-		add_event("click", &button, {
-			let viewer = viewer.clone();
-			move |_: MouseEvent| {
-				let w = window().unwrap();
-				let nav = proto_get(&w, "navigator").unwrap();
-				let clip = proto_get(nav.dyn_ref().unwrap(), "clipboard").unwrap();
-				let read = proto_get(clip.dyn_ref().unwrap(), "readText").unwrap();
-				let read = read.dyn_into::<Function>().unwrap();
-				let text: Promise = read.call(&clip, ()).unwrap().dyn_into().unwrap();
-
-				let viewer = viewer.clone();
-
-				let c = wrap(move |text: JsValue| {
-					use base64::prelude::*;
-					use flate2::read::ZlibDecoder;
-					use std::io::Read;
-
-					let text = text.as_string().unwrap();
-					let bytes = BASE64_STANDARD.decode(text).unwrap();
-					let mut data = vec![];
-					ZlibDecoder::new(&mut bytes.as_slice())
-						.read_to_end(&mut data).unwrap();
-
-					let mut viewer = viewer.lock().unwrap();
-					viewer.grid = Grid::load(&mut data.as_slice()).unwrap();
-				});
-				let _ = text.then(&c);
-				c.forget();
-			}
-		});
-
-		button
-	};
-
-	controls.append_child(&slider).unwrap();
+	controls.append_child(&create_slider(di, label.clone())).unwrap();
 	controls.append_child(&label).unwrap();
-	controls.append_child(&play_toggle).unwrap();
-	controls.append_child(&save).unwrap();
-	controls.append_child(&load).unwrap();
 
-	div.append_child(&controls).unwrap();
+	controls.append_child(&create_play_button(viewer.clone())).unwrap();
+	controls.append_child(&create_save_button(viewer.clone())).unwrap();
+	controls.append_child(&create_load_button(viewer.clone())).unwrap();
+
+	controls
 }
