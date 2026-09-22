@@ -18,6 +18,16 @@ macro_rules! println {
 }
 pub(crate) use println;
 
+#[cfg(target_family="wasm")]
+macro_rules! eprintln {
+	() => {
+		console::error_0();
+	};
+	($($arg:tt)*) => {
+		::web_sys::console::error_1(&format!($($arg)*).into());
+	};
+}
+pub(crate) use eprintln;
 
 
 pub fn wrap<T: FromWasmAbi, F: FnMut(T) + 'static>(callback: F) -> ScopedClosure<'static, dyn FnMut(T)> {
