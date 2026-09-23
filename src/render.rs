@@ -43,7 +43,9 @@ impl Line {
 }
 impl std::fmt::Debug for Line {
 	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-		write!(f, "({}, {}) <-> ({}, {})", self.a.0, self.a.1, self.b.0, self.b.1)
+		let a = self.a.min(self.b);
+		let b = self.a.max(self.b);
+		write!(f, "({}, {}) <-> ({}, {})", a.0, a.1, b.0, b.1)
 	}
 }
 impl PartialEq for Line {
@@ -53,6 +55,17 @@ impl PartialEq for Line {
 	}
 }
 impl Eq for Line {}
+impl PartialOrd for Line {
+	fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+		Some(self.cmp(other))
+	}
+}
+impl Ord for Line {
+	fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+		self.a.min(self.b).cmp(&other.a.min(other.b))
+			.then(self.a.max(self.b).cmp(&other.a.max(other.b)))
+	}
+}
 
 fn merge_lines(lines: &mut Vec<Line>) {
 	let mut i = 0;
@@ -73,15 +86,19 @@ fn merge_lines(lines: &mut Vec<Line>) {
 }
 
 fn exact_contour(lines: &mut Vec<Line>) {
+	lines.sort();
+
+	// only retain elements which are distinct
+	// (which is not the same as Vec::dedup)
 	let mut i = 0;
-	while i < lines.len() {
-		let cur = lines[i].clone();
-		let dupes = lines.extract_if(i + 1.., |x| x == &cur).count();
-		if dupes > 0 {
-			lines.remove(i);
-		} else {
+	while i + 1 < lines.len() {
+		if lines[i] != lines[i + 1] {
 			i += 1;
+			continue;
 		}
+
+		let count = 2 + lines[i + 2..].iter().take_while(|&x| x == &lines[i]).count();
+		lines.drain(i..i + count);
 	}
 }
 
