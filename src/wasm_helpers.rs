@@ -13,7 +13,7 @@ macro_rules! println {
 		console::log_0();
 	};
 	($($arg:tt)*) => {
-		::web_sys::console::log_1(&format!($($arg)*).into());
+		::web_sys::console::log_1(&format!($($arg)*).into())
 	};
 }
 pub(crate) use println;

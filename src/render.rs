@@ -1,10 +1,10 @@
 use std::sync::{Arc, Mutex};
 use std::str::FromStr;
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 
 use cgol::*;
 use crate::wasm_helpers::*;
-use crate::wasm_helpers::println;
+use crate::wasm_helpers::{println, eprintln};
 use crate::dom::*;
 
 
@@ -86,7 +86,7 @@ fn merge_lines(lines: &mut Vec<Line>) {
 }
 
 fn exact_contour(lines: &mut Vec<Line>) {
-	lines.sort();
+	lines.sort_unstable();
 
 	// only retain elements which are distinct
 	// (which is not the same as Vec::dedup)
@@ -160,6 +160,13 @@ impl<F: Fn() + 'static> DynamicInterval<F> {
 	}
 }
 
+#[derive(Debug)]
+enum Action {
+	SetCell(Pos, bool),
+	MultiSetCell(Vec<(Pos, bool)>),
+	SetGrid{from: Grid, to: Grid},
+}
+
 struct Viewer {
 	grid: Grid,
 	ctx: CanvasRenderingContext2d,
@@ -175,6 +182,8 @@ struct Viewer {
 	rsel: Option<((f64, f64), (f64, f64))>,
 
 	stopped_sel: bool,
+	action_log: VecDeque<Action>,
+	action_idx: usize,
 }
 impl Viewer {
 	fn new(grid: Grid, ctx: CanvasRenderingContext2d) -> Self {
@@ -188,7 +197,57 @@ impl Viewer {
 			cursor_pin: None,
 			rsel: None,
 			stopped_sel: true,
+			action_log: Default::default(),
+			action_idx: 0,
 		}
+	}
+
+	fn apply_action(&mut self) {
+		match self.action_log[self.action_idx] {
+			Action::SetCell(pos, value) => self.grid.set_cell(pos, value),
+			Action::MultiSetCell(ref delta) => delta.iter().for_each(|&(pos, value)| self.grid.set_cell(pos, value)),
+			Action::SetGrid{ref to, ..} => self.grid = to.clone(),
+		}
+		self.action_idx += 1;
+	}
+	fn unapply_action(&mut self) {
+		self.action_idx -= 1;
+		match self.action_log[self.action_idx] {
+			Action::SetCell(pos, value) => self.grid.set_cell(pos, !value),
+			Action::MultiSetCell(ref delta) => delta.iter().for_each(|&(pos, value)| self.grid.set_cell(pos, !value)),
+			Action::SetGrid{ref from, ..} => self.grid = from.clone(),
+		}
+	}
+
+	const MAX_UNDOS: usize = 100;
+	fn do_action(&mut self, action: Action) {
+		self.action_log.drain(self.action_idx..);
+
+		let next_len = self.action_log.len() + 1;
+		let overflow = next_len - next_len.min(Self::MAX_UNDOS);
+		self.action_log.drain(..overflow);
+		self.action_idx -= overflow;
+
+		self.action_log.push_back(action);
+		self.apply_action();
+	}
+	fn undo_action(&mut self) {
+		if self.action_idx == 0 {
+			// we're already at the start of the undo list
+			// so do nothing
+			return;
+		}
+
+		self.unapply_action();
+	}
+	fn redo_action(&mut self) {
+		if self.action_idx >= self.action_log.len() {
+			// we're already at the end of the undo list
+			// so do nothing
+			return;
+		}
+
+		self.apply_action();
 	}
 
 	fn from_screen_space(&self, xy: (f64, f64)) -> (f64, f64) {
@@ -536,7 +595,8 @@ fn init_canvas(canvas: Arc<WrappedHtml>, viewer: Arc<Mutex<Viewer>>) {
 				).into();
 
 				let alive = viewer.grid.get_cell(&pos);
-				viewer.grid.set_cell(pos, !alive);
+				let action = Action::SetCell(pos, !alive);
+				viewer.do_action(action);
 
 				viewer.draw();
 			}
@@ -554,25 +614,54 @@ fn init_canvas(canvas: Arc<WrappedHtml>, viewer: Arc<Mutex<Viewer>>) {
 
 				let key: String = proto_get(e.as_ref(), "key").unwrap().as_string().unwrap();
 				let ctrl: bool = proto_get(e.as_ref(), "ctrlKey").unwrap().dyn_into::<Boolean>().unwrap().into();
+				let shift: bool = proto_get(e.as_ref(), "shiftKey").unwrap().dyn_into::<Boolean>().unwrap().into();
+
+				let copy = key == "c" && ctrl;
+				let paste = key == "v" && ctrl;
+				let cut = key == "x" && ctrl;
+				let undo = key == "z" && ctrl;
+				let redo = ctrl && (key == "Z" || key == "y");
 
 				// copy selection
-				if key == "c" && ctrl && let Some(sel) = viewer.get_selection() {
+				if (copy || cut) && let Some(sel) = viewer.get_selection() {
 					let x_bound = sel.0.0..sel.1.0;
 					let y_bound = sel.0.1..sel.1.0;
 
 					let sel = viewer.grid.get_alive()
 						.filter(|pos| x_bound.contains(&pos.x) && y_bound.contains(&pos.y))
-						.map(|pos| (pos.x - x_bound.start, pos.y - y_bound.start).into());
-					let grid = Grid::from_iter(sel);
+						.copied()
+						.collect::<HashSet<_>>();
+
+					if cut {
+						let action = Action::MultiSetCell(sel.iter().map(|pos| (*pos, false)).collect());
+						viewer.do_action(action);
+					}
+
+					let grid = Grid::from_iter(
+						sel.into_iter().map(|pos| (pos.x - x_bound.start, pos.y - y_bound.start).into())
+					);
 
 					to_clipboard(&grid).await;
 					draw_flag = true;
 				}
 
 				// paste
-				if key == "v" && ctrl {
-					viewer.grid = from_clipboard().await;
+				if paste {
+					let new_grid = from_clipboard().await;
+					let action = Action::SetGrid{from: viewer.grid.clone(), to: new_grid};
+					viewer.do_action(action);
+
 					viewer.rsel = None;
+					draw_flag = true;
+				}
+
+				if undo {
+					viewer.undo_action();
+					draw_flag = true;
+				}
+
+				if redo {
+					viewer.redo_action();
 					draw_flag = true;
 				}
 
@@ -628,7 +717,8 @@ fn create_load_button(viewer: Arc<Mutex<Viewer>>) -> WrappedHtml {
 				let grid = from_clipboard().await;
 
 				let mut viewer = viewer.lock().unwrap();
-				viewer.grid = grid;
+				let action = Action::SetGrid{from: viewer.grid.clone(), to: grid};
+				viewer.do_action(action);
 				viewer.draw();
 
 				return Ok(JsValue::NULL);
