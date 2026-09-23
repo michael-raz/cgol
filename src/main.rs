@@ -1,10 +1,16 @@
-#[cfg(target_family="wasm")]
-use crate::wasm_helpers::{println, eprintln};
+cfg_select! {
+	target_family="wasm" => {
+		mod wasm_helpers;
+		mod dom;
+		mod render;
+	}
+	_ => {}
+}
 
 #[cfg(target_family="wasm")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn main() {
-	println!("start");
+fn main() {
+	use crate::wasm_helpers::{println, eprintln};
+
 	std::panic::set_hook(Box::new(|pinfo| {
 		let mut out = String::new();
 		if let Some(loc) = pinfo.location() {
@@ -28,6 +34,6 @@ pub fn main() {
 }
 
 #[cfg(not(target_family="wasm"))]
-pub fn main() {
+fn main() {
 	todo!();
 }

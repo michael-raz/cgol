@@ -12,12 +12,12 @@
 			devShells.${system}.default = pkgs.mkShell {
 				shellHook = ''
 					PS1="\[\033[36m\][flake]\[\033[0m\] $PS1"
-					alias build="wasm-pack build --target web"
+					alias build="cargo build -r --target wasm32-unknown-unknown && wasm-bindgen --no-typescript --target=web --out-dir pkg ./target/wasm32-unknown-unknown/release/cgol.wasm"
 				'';
 				packages = with pkgs; [
 					cargo
 					lld
-					wasm-pack
+					wasm-bindgen-cli_0_2_126
 				];
 			};
 		};

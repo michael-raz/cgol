@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 use std::str::FromStr;
 
-use crate::cgol::*;
+use cgol::*;
 use crate::wasm_helpers::*;
 use crate::wasm_helpers::println;
 use crate::dom::*;
