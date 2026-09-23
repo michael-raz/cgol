@@ -162,6 +162,7 @@ impl Viewer {
 }
 
 
+
 async fn to_clipboard(grid: &Grid) {
 	let mut raw = vec![];
 	grid.save(&mut raw).unwrap();
@@ -211,7 +212,6 @@ async fn from_clipboard() -> Grid {
 
 
 
-
 pub fn run() {
 	let w = window().unwrap();
 	let document = w.document().unwrap();
@@ -231,7 +231,6 @@ pub fn run() {
 		"width": "100%";
 		"height": "100%";
 	});
-	div.append_child(&canvas).unwrap();
 
 	let ctx = canvas.as_elm::<HtmlCanvasElement>().unwrap().get_context("2d").unwrap().unwrap()
 		.dyn_into::<CanvasRenderingContext2d>().unwrap();
@@ -248,7 +247,7 @@ pub fn run() {
 	viewer.lock().unwrap().draw();
 
 	let canvas = Arc::new(canvas);
-	init_canvas(canvas, viewer.clone());
+	init_canvas(canvas.clone(), viewer.clone());
 
 	let di = DynamicInterval::new(w, {
 		let viewer = viewer.clone();
@@ -262,7 +261,10 @@ pub fn run() {
 	}, None);
 	DynamicInterval::set_rate(di.clone(), from_slider(DEFAULT_SLIDE));
 
+	div.append_child(&canvas).unwrap();
 	div.append_child(&create_controls(viewer, di)).unwrap();
+
+	window().unwrap().dispatch_event(&Event::new("resize").unwrap()).unwrap();
 }
 
 
