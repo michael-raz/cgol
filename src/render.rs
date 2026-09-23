@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex};
 use std::str::FromStr;
+use std::collections::HashSet;
 
 use cgol::*;
 use crate::wasm_helpers::*;
@@ -9,6 +10,82 @@ use crate::dom::*;
 
 
 const CELL_SIZE: f64 = 50.0;
+
+#[derive(Clone)]
+struct Line {
+	a: (i64, i64),
+	b: (i64, i64),
+}
+impl Line {
+	fn parallel(&self, other: &Self) -> bool {
+		(self.a.0 == self.b.0 && other.a.0 == other.b.0) ||
+		(self.a.1 == self.b.1 && other.a.1 == other.b.1)
+	}
+
+	fn joint(&self, other: &Self) -> bool {
+		self.a == other.a || self.a == other.b ||
+		self.b == other.a || self.b == other.b
+	}
+
+	fn join(&mut self, other: &Self) {
+		if self.a == other.a {
+			self.a = other.b;
+		} else if self.a == other.b {
+			self.a = other.a;
+		} else if self.b == other.a {
+			self.b = other.b;
+		} else if self.b == other.b {
+			self.b = other.a;
+		} else {
+			unreachable!();
+		}
+	}
+}
+impl std::fmt::Debug for Line {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+		write!(f, "({}, {}) <-> ({}, {})", self.a.0, self.a.1, self.b.0, self.b.1)
+	}
+}
+impl PartialEq for Line {
+	fn eq(&self, other: &Self) -> bool {
+		(self.a == other.a && self.b == other.b) ||
+		(self.a == other.b && self.b == other.a)
+	}
+}
+impl Eq for Line {}
+
+fn merge_lines(lines: &mut Vec<Line>) {
+	let mut i = 0;
+	while i < lines.len() {
+		let others = (i + 1..lines.len()).rev()
+			.filter(|&j| lines[i].joint(&lines[j]) && lines[i].parallel(&lines[j]))
+			.collect::<Vec<_>>();
+
+		if others.is_empty() {
+			i += 1;
+		} else {
+			for j in others {
+				let other = lines.remove(j);
+				lines[i].join(&other);
+			}
+		}
+	}
+}
+
+fn exact_contour(lines: &mut Vec<Line>) {
+	let mut i = 0;
+	while i < lines.len() {
+		let cur = lines[i].clone();
+		let dupes = lines.extract_if(i + 1.., |x| x == &cur).count();
+		if dupes > 0 {
+			lines.remove(i);
+		} else {
+			i += 1;
+		}
+	}
+}
+
+
 
 struct DynamicInterval<F: Fn() + 'static> {
 	rate: Option<u64>,
@@ -149,14 +226,76 @@ impl Viewer {
 			);
 		}
 
-		// draw cells
+		// group cells together and draw them as one
 		self.ctx.set_fill_style_str(ALIVE_COLOR);
+		let mut unsued_cells = HashSet::<&Pos>::from_iter(self.grid.get_alive());
 		for pos in self.grid.get_alive() {
-			self.ctx.fill_rect(
-				size * (pos.x as f64) - self.camera_pos.0,
-				size * (pos.y as f64) - self.camera_pos.1,
-				size, size,
-			);
+			if !unsued_cells.remove(pos) {
+				continue;
+			}
+
+			// get taxicab flood fill of pos
+			let mut group = vec![pos];
+			let mut i = 0;
+			while i < group.len() {
+				let p = group[i];
+
+				group.extend([
+					Pos{x: -1, y:  0},
+					Pos{x:  1, y:  0},
+					Pos{x:  0, y: -1},
+					Pos{x:  0, y:  1},
+				].into_iter().filter_map(|offset| {
+					unsued_cells.take(&(offset + *p))
+				}));
+
+				i += 1;
+			}
+
+			// convert cells into lines
+			let mut lines = group.into_iter()
+				.flat_map(|pos: &Pos| {
+					[
+						Line{a: (pos.x + 0, pos.y + 0), b: (pos.x + 1, pos.y + 0)},
+						Line{a: (pos.x + 1, pos.y + 0), b: (pos.x + 1, pos.y + 1)},
+						Line{a: (pos.x + 1, pos.y + 1), b: (pos.x + 0, pos.y + 1)},
+						Line{a: (pos.x + 0, pos.y + 1), b: (pos.x + 0, pos.y + 0)},
+					].into_iter()
+				})
+				.collect::<Vec<_>>();
+
+			exact_contour(&mut lines);
+			merge_lines(&mut lines);
+
+			// draw cells
+			while let Some(line) = lines.pop() {
+				macro_rules! with_screen_pos {
+					($($func:tt).*($pos:expr)) => {
+						$($func).*(($pos.0 as f64 * size) - self.camera_pos.0, ($pos.1 as f64 * size) - self.camera_pos.1)
+					};
+				}
+
+				self.ctx.begin_path();
+				with_screen_pos!(self.ctx.move_to(line.a));
+				with_screen_pos!(self.ctx.line_to(line.b));
+
+				let mut prev = line.b;
+				loop {
+					let curr = lines.extract_if(.., |other| other.a == prev || other.b == prev).next();
+					if let Some(curr) = curr {
+						let curr = if curr.a == prev { curr.b } else { curr.a };
+						with_screen_pos!(self.ctx.line_to(curr));
+
+						prev = curr;
+					} else {
+						break;
+					}
+				}
+
+				with_screen_pos!(self.ctx.line_to(line.a));
+				self.ctx.close_path();
+				self.ctx.fill();
+			}
 		}
 	}
 }
