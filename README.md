@@ -1,8 +1,9 @@
-# Conway's Game of Life
-This is a Rust implementation of [Conway's Game of Life](https://en.wikipedia.org/wiki/Conway's_Game_of_Life) (**cgol**).
+# Lari
+This is a Rust implementation of [Conway's Game of Life](https://en.wikipedia.org/wiki/Conway's_Game_of_Life).
 It's intended to be a web app that can also run natively on Linux (maybe Windows and macOS later on).
+It can also be used as a library.
 
----
+
 
 ## Features
 - [x] Infinite canvas

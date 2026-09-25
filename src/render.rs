@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 use std::str::FromStr;
 use std::collections::{HashSet, VecDeque};
 
-use cgol::*;
+use lari::*;
 use crate::wasm_helpers::*;
 use crate::wasm_helpers::{println, eprintln};
 use crate::dom::*;
